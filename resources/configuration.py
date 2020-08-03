@@ -1,4 +1,7 @@
 configuration = {
+    "global": {
+        "fuzzy_match_threshold": 95,
+    },
     "plants": {
         "title": "{scientific_name} ({common_name})",
         "tags": {
@@ -12,11 +15,11 @@ configuration = {
                 "shade",
                 "drought",
                 "groundcover",
+                "reg water",
                 "tree",
                 "shrub",
                 ],
             "exclude": [
-                "reg water",
             ],
             "replace": {},
             "exceptions": {
@@ -36,13 +39,13 @@ configuration = {
                 "drought",
                 "rain garden",
                 "pollinator",
+                "reg water",
                 "deer",
                 "native",
                 "herb",
                 "veggie",
                 ],
             "exclude": [
-                "reg water",
             ],
             "replace": {},
             "exceptions": {},
@@ -60,13 +63,13 @@ configuration = {
                 "pollinator",
                 "deer",
                 "native",
+                "reg water",
                 "houseplant",
                 "bright light",
                 "indirect light",
                 "herb",
                 ],
             "exclude": [
-                "reg water",
             ],
             "replace": {
                 "sun": "bright light",
