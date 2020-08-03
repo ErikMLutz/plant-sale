@@ -1,9 +1,11 @@
 import re
 import os
 import copy
+import pickle
 import marshmallow
 
 from sheets import SheetsClient, SheetsInventoryMeta, SheetsInventorySchema
+from squarespace import SquareSpaceInventorySchema
 
 
 class Inventory:
@@ -24,10 +26,45 @@ class Inventory:
         self.houseplants = self.clean(self.houseplants_raw)
         print("Success!")
 
+        print("Transforming Plants... ", end="")
+        self.plants = self.transform(
+            self.plants,
+            title="{scientific_name} ({common_name})"
+        )
+        print("Success!")
+
+        print("Transforming Veggies... ", end="")
+        self.plants = self.transform(
+            self.veggies,
+            title="{common_name}"
+        )
+        print("Success!")
+
+        print("Transforming Houseplants... ", end="")
+        self.plants = self.transform(
+            self.houseplants,
+            title="{common_name} ({scientific_name})"
+        )
+        print("Success!")
+
     def get_data(self):
         """
         Pulls raw Plants, Veggies, and Houseplants data
         """
+
+        # pull data from pickled store if available
+        if os.path.exists("raw_data.pickle"):
+            print("from pickled store... ", end="")
+            with open("raw_data.pickle", "rb") as f:
+                data = pickle.load(f)
+
+                self.plants_raw = data["plants"]
+                self.veggies_raw = data["veggies"]
+                self.houseplants_raw = data["houseplants"]
+
+            return
+
+        print("from online spreadsheet... ", end="")
         client = SheetsClient()
 
         self.plants_raw = client.get_range(
@@ -44,6 +81,13 @@ class Inventory:
             os.environ["PLANT_SALE_INVENTORY_SPREADSHEET_ID"],
             "!".join([SheetsInventoryMeta.houseplants_sheet, SheetsInventoryMeta.spreadsheet_range])
         )
+
+        with open("raw_data.pickle", "wb+") as f:
+            pickle.dump({
+                "plants": self.plants_raw,
+                "veggies": self.veggies_raw,
+                "houseplants": self.houseplants_raw,
+            }, f)
 
     def clean(self, data):
         data = copy.deepcopy(data)
@@ -81,6 +125,45 @@ class Inventory:
 
         return cleaned_data
 
+    def transform(
+        self,
+        data,
+        title,
+    ):
+        transformed_data = []
+        schema = SquareSpaceInventorySchema()
+
+        for item in data:
+            transformed_data.append(schema.load({
+                # "product_id": None,
+                # "variant_id": None,
+                # "product_type": None,
+                # "product_page": None,
+                # "product_url": None,
+                "title": title.format(**item) or item["common_name"],
+                # "description": None,
+                # "sku": None,
+                # "option_name_1": None,
+                # "option_value_1": None,
+                # "option_name_2": None,
+                # "option_value_2": None,
+                # "option_name_3": None,
+                # "option_value_3": None,
+                # "price": None,
+                # "sale_price": None,
+                # "on_sale": None,
+                # "stock": None,
+                # "categories": None,
+                # "tags": None,
+                # "weight": None,
+                # "length": None,
+                # "width": None,
+                # "height": None,
+                # "visible": None,
+                # "image_url": None,
+            }))
+
+        return transformed_data
 
 def main():
     inventory = Inventory()

@@ -133,3 +133,4 @@ dmypy.json
 .envrc
 credentials.json
 token.pickle
+raw_data.pickle
