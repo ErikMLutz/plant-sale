@@ -4,8 +4,13 @@ import copy
 import pickle
 import marshmallow
 
+from fuzzywuzzy import process
+
 from sheets import SheetsClient, SheetsInventoryMeta, SheetsInventorySchema
 from squarespace import SquareSpaceInventorySchema
+from resources.configuration import configuration
+
+FUZZY_MATCH_THRESHOLD = 95
 
 
 class Inventory:
@@ -27,25 +32,17 @@ class Inventory:
         print("Success!")
 
         print("Transforming Plants... ", end="")
-        self.plants = self.transform(
-            self.plants,
-            title="{scientific_name} ({common_name})"
-        )
+        self.plants = self.transform(self.plants, configuration["plants"])
         print("Success!")
 
         print("Transforming Veggies... ", end="")
-        self.plants = self.transform(
-            self.veggies,
-            title="{common_name}"
-        )
+        self.plants = self.transform(self.veggies, configuration["veggies"])
         print("Success!")
 
         print("Transforming Houseplants... ", end="")
-        self.plants = self.transform(
-            self.houseplants,
-            title="{common_name} ({scientific_name})"
-        )
+        self.plants = self.transform(self.houseplants, configuration["houseplants"])
         print("Success!")
+
 
     def get_data(self):
         """
@@ -125,45 +122,69 @@ class Inventory:
 
         return cleaned_data
 
-    def transform(
-        self,
-        data,
-        title,
-    ):
+    def transform(self, data, transform_configuration):
         transformed_data = []
         schema = SquareSpaceInventorySchema()
 
         for item in data:
-            transformed_data.append(schema.load({
-                # "product_id": None,
-                # "variant_id": None,
-                # "product_type": None,
-                # "product_page": None,
-                # "product_url": None,
-                "title": title.format(**item) or item["common_name"],
-                # "description": None,
-                # "sku": None,
-                # "option_name_1": None,
-                # "option_value_1": None,
-                # "option_name_2": None,
-                # "option_value_2": None,
-                # "option_name_3": None,
-                # "option_value_3": None,
-                # "price": None,
-                # "sale_price": None,
-                # "on_sale": None,
-                # "stock": None,
-                # "categories": None,
-                # "tags": None,
-                # "weight": None,
-                # "length": None,
-                # "width": None,
-                # "height": None,
-                # "visible": None,
-                # "image_url": None,
-            }))
+            try:
+                transformed_data.append(schema.load({
+                    # "product_id": None,
+                    # "variant_id": None,
+                    # "product_type": None,
+                    # "product_page": None,
+                    # "product_url": None,
+                    "title": transform_configuration["title"].format(**item),
+                    # "description": None,
+                    # "sku": None,
+                    # "option_name_1": None,
+                    # "option_value_1": None,
+                    # "option_name_2": None,
+                    # "option_value_2": None,
+                    # "option_name_3": None,
+                    # "option_value_3": None,
+                    # "price": None,
+                    # "sale_price": None,
+                    # "on_sale": None,
+                    # "stock": None,
+                    # "categories": None,
+                    "tags": self.transform_tags(item["category"] + "," + item["tags"], transform_configuration["tags"]),
+                    # "weight": None,
+                    # "length": None,
+                    # "width": None,
+                    # "height": None,
+                    # "visible": None,
+                    # "image_url": None,
+                }))
+            except Exception as e:
+                print(item)
+                raise e
 
         return transformed_data
+
+    def transform_tags(self, candidate_tags, tag_configuration):
+        transformed_tags = set()
+
+        candidate_tags = re.split(r"\s*[,/]+\s*", candidate_tags)
+
+        for tag in candidate_tags:
+            if tag == "":
+                continue
+
+            match = process.extractOne(tag, tag_configuration["valid"])
+            exclude_match = process.extractOne(tag, tag_configuration["exclude"])
+            if match is not None and match[1] >= FUZZY_MATCH_THRESHOLD:
+                transformed_tags.add(tag_configuration["replace"].get(match[0], match[0]))
+            elif exclude_match is not None and exclude_match[1] >= FUZZY_MATCH_THRESHOLD:
+                continue
+            elif tag_configuration["exceptions"].get(tag):
+                transformed_tags.add(tag_configuration["exceptions"].get(tag))
+            else:
+                raise Exception(f"No tag match found for '{tag}'.")
+
+        return list(transformed_tags)
+
+
 
 def main():
     inventory = Inventory()
