@@ -8,9 +8,10 @@ from fuzzywuzzy import process
 
 from sheets import SheetsClient, SheetsInventoryMeta, SheetsInventorySchema
 from squarespace import SquareSpaceInventorySchema
-from resources.configuration import configuration
+from resources.configuration import Configuration
 
-FUZZY_MATCH_THRESHOLD = configuration["global"]["fuzzy_match_threshold"]
+CONFIGURATION = Configuration()
+FUZZY_MATCH_THRESHOLD = CONFIGURATION.fuzzy_match_threshold
 
 
 class Inventory:
@@ -32,15 +33,15 @@ class Inventory:
         print("Success!")
 
         print("Transforming Plants... ", end="")
-        self.plants = self.transform(self.plants, configuration["plants"])
+        self.plants = self.transform(self.plants, CONFIGURATION.plants)
         print("Success!")
 
         print("Transforming Veggies... ", end="")
-        self.plants = self.transform(self.veggies, configuration["veggies"])
+        self.plants = self.transform(self.veggies, CONFIGURATION.veggies)
         print("Success!")
 
         print("Transforming Houseplants... ", end="")
-        self.plants = self.transform(self.houseplants, configuration["houseplants"])
+        self.plants = self.transform(self.houseplants, CONFIGURATION.houseplants)
         print("Success!")
 
 
@@ -129,35 +130,14 @@ class Inventory:
         for item in data:
             try:
                 transformed_item = schema.load({
-                    # "product_id": None,
-                    # "variant_id": None,
-                    # "product_type": None,
-                    # "product_page": None,
-                    # "product_url": None,
                     "title": transform_configuration["title"].format(**item),
                     "description": f"<p>{item['info']}, {item['zone']}</p>",
-                    # "sku": None,
-                    # "option_name_1": None,
-                    # "option_value_1": None,
-                    # "option_name_2": None,
-                    # "option_value_2": None,
-                    # "option_name_3": None,
-                    # "option_value_3": None,
-                    # "price": None,
-                    # "sale_price": None,
-                    # "on_sale": None,
                     "stock": 0,
-                    # "categories": None,
                     "tags": self.transform_tags(item["category"] + "," + item["tags"], transform_configuration["tags"]),
-                    # "weight": None,
-                    # "length": None,
-                    # "width": None,
-                    # "height": None,
-                    # "visible": None,
                     "image_url": item["image_url"],
                 })
 
-                transformed_data.append(copy.deepcopy(transformed_item))
+                transformed_data += transform_configuration["post_load"](copy.deepcopy(transformed_item))
             except Exception as e:
                 print(item)
                 raise e
