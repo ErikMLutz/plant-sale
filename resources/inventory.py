@@ -1,5 +1,6 @@
 import re
 import os
+import csv
 import copy
 import pickle
 import marshmallow
@@ -42,6 +43,18 @@ class Inventory:
 
         print("Transforming Houseplants... ", end="")
         self.plants = self.transform(self.houseplants, CONFIGURATION.houseplants)
+        print("Success!")
+
+        print("Writing Plants... ", end="")
+        self.plants = self.write("plants.csv", self.plants)
+        print("Success!")
+
+        print("Writing Veggies... ", end="")
+        self.plants = self.write("veggies.csv", self.veggies)
+        print("Success!")
+
+        print("Writing Houseplants... ", end="")
+        self.plants = self.write("houseplants.csv", self.houseplants)
         print("Success!")
 
 
@@ -166,6 +179,14 @@ class Inventory:
 
         return list(transformed_tags)
 
+    def write(self, file_name, data):
+        with open(file_name, 'w+', newline='') as f:
+            fieldnames = list(data[0].keys())
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+            writer.writeheader()
+            for item in data:
+                writer.writerow(item)
 
 
 def main():
