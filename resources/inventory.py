@@ -38,23 +38,23 @@ class Inventory:
         print("Success!")
 
         print("Transforming Veggies... ", end="")
-        self.plants = self.transform(self.veggies, CONFIGURATION.veggies)
+        self.veggies = self.transform(self.veggies, CONFIGURATION.veggies)
         print("Success!")
 
         print("Transforming Houseplants... ", end="")
-        self.plants = self.transform(self.houseplants, CONFIGURATION.houseplants)
+        self.houseplants = self.transform(self.houseplants, CONFIGURATION.houseplants)
         print("Success!")
 
         print("Writing Plants... ", end="")
-        self.plants = self.write("plants.csv", self.plants)
+        self.plants = self.write("data/plants.csv", self.plants)
         print("Success!")
 
         print("Writing Veggies... ", end="")
-        self.plants = self.write("veggies.csv", self.veggies)
+        self.plants = self.write("data/veggies.csv", self.veggies)
         print("Success!")
 
         print("Writing Houseplants... ", end="")
-        self.plants = self.write("houseplants.csv", self.houseplants)
+        self.plants = self.write("data/houseplants.csv", self.houseplants)
         print("Success!")
 
 
@@ -181,7 +181,7 @@ class Inventory:
 
     def write(self, file_name, data):
         with open(file_name, 'w+', newline='') as f:
-            fieldnames = list(data[0].keys())
+            fieldnames = list(SquareSpaceInventorySchema._declared_fields.keys())
             writer = csv.DictWriter(f, fieldnames=fieldnames)
 
             writer.writeheader()
