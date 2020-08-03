@@ -1,9 +1,12 @@
+import marshmallow
+
+
 class ColumnEnum:
     def __init__(self, column):
         self.column = column
         self.index = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".find(column)
 
-class SheetsInventorySchema:
+class SheetsInventoryMeta:
     sku = ColumnEnum("A")
     scientific_name = ColumnEnum("B")
     common_name = ColumnEnum("C")
@@ -23,3 +26,17 @@ class SheetsInventorySchema:
 
     # index of location column + 1
     number_of_columns = ColumnEnum("N").index + 1
+
+
+class SheetsInventorySchema(marshmallow.Schema):
+    sku = marshmallow.fields.Integer(required=True, allow_none=True)
+    scientific_name = marshmallow.fields.String(required=True, allow_none=True)
+    common_name = marshmallow.fields.String(required=True, allow_none=True)
+    image_url = marshmallow.fields.URL(required=True, allow_none=True)
+    category = marshmallow.fields.String(required=True, allow_none=True)
+    tags = marshmallow.fields.String(required=True, allow_none=True)
+    zone = marshmallow.fields.String(required=True, allow_none=True)
+    info = marshmallow.fields.String(required=True, allow_none=True)
+    pot = marshmallow.fields.String(required=True, allow_none=True)
+    price = marshmallow.fields.Float(required=True, allow_none=True)
+    location = marshmallow.fields.String(required=True, allow_none=True)

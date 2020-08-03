@@ -3,21 +3,7 @@ import os
 import copy
 import marshmallow
 
-from sheets import SheetsClient, SheetsInventorySchema
-
-
-class InventorySchema(marshmallow.Schema):
-    sku = marshmallow.fields.Integer(required=True, allow_none=True)
-    scientific_name = marshmallow.fields.String(required=True, allow_none=True)
-    common_name = marshmallow.fields.String(required=True, allow_none=True)
-    image_url = marshmallow.fields.URL(required=True, allow_none=True)
-    category = marshmallow.fields.String(required=True, allow_none=True)
-    tags = marshmallow.fields.String(required=True, allow_none=True)
-    zone = marshmallow.fields.String(required=True, allow_none=True)
-    info = marshmallow.fields.String(required=True, allow_none=True)
-    pot = marshmallow.fields.String(required=True, allow_none=True)
-    price = marshmallow.fields.Float(required=True, allow_none=True)
-    location = marshmallow.fields.String(required=True, allow_none=True)
+from sheets import SheetsClient, SheetsInventoryMeta, SheetsInventorySchema
 
 
 class Inventory:
@@ -46,22 +32,22 @@ class Inventory:
 
         self.plants_raw = client.get_range(
             os.environ["PLANT_SALE_INVENTORY_SPREADSHEET_ID"],
-            "!".join([SheetsInventorySchema.plants_sheet, SheetsInventorySchema.spreadsheet_range])
+            "!".join([SheetsInventoryMeta.plants_sheet, SheetsInventoryMeta.spreadsheet_range])
         )
 
         self.veggies_raw = client.get_range(
             os.environ["PLANT_SALE_INVENTORY_SPREADSHEET_ID"],
-            "!".join([SheetsInventorySchema.veggies_sheet, SheetsInventorySchema.spreadsheet_range])
+            "!".join([SheetsInventoryMeta.veggies_sheet, SheetsInventoryMeta.spreadsheet_range])
         )
 
         self.houseplants_raw = client.get_range(
             os.environ["PLANT_SALE_INVENTORY_SPREADSHEET_ID"],
-            "!".join([SheetsInventorySchema.houseplants_sheet, SheetsInventorySchema.spreadsheet_range])
+            "!".join([SheetsInventoryMeta.houseplants_sheet, SheetsInventoryMeta.spreadsheet_range])
         )
 
     def clean(self, data):
         data = copy.deepcopy(data)
-        schema = InventorySchema()
+        schema = SheetsInventorySchema()
         cleaned_data = []
 
         for i, row in enumerate(data):
@@ -69,25 +55,25 @@ class Inventory:
                 # convert '' to None and pad missing values at end
                 row = [
                     item if item != "" else None
-                    for item in row + [""] * (SheetsInventorySchema.number_of_columns - len(row))
+                    for item in row + [""] * (SheetsInventoryMeta.number_of_columns - len(row))
                 ]
 
                 # skip rows without SKUs
-                if row[SheetsInventorySchema.sku.index] is None: 
+                if row[SheetsInventoryMeta.sku.index] is None: 
                     continue
 
                 cleaned_data.append(schema.load({
-                    "sku": row[SheetsInventorySchema.sku.index],
-                    "scientific_name": row[SheetsInventorySchema.scientific_name.index],
-                    "common_name": row[SheetsInventorySchema.common_name.index],
-                    "image_url": row[SheetsInventorySchema.image_url.index],
-                    "category": row[SheetsInventorySchema.category.index],
-                    "tags": row[SheetsInventorySchema.tags.index],
-                    "zone": row[SheetsInventorySchema.zone.index],
-                    "info": row[SheetsInventorySchema.info.index],
-                    "pot": str(row[SheetsInventorySchema.pot.index]),
-                    "price": row[SheetsInventorySchema.price.index],
-                    "location": str(row[SheetsInventorySchema.location.index]),
+                    "sku": row[SheetsInventoryMeta.sku.index],
+                    "scientific_name": row[SheetsInventoryMeta.scientific_name.index],
+                    "common_name": row[SheetsInventoryMeta.common_name.index],
+                    "image_url": row[SheetsInventoryMeta.image_url.index],
+                    "category": row[SheetsInventoryMeta.category.index],
+                    "tags": row[SheetsInventoryMeta.tags.index],
+                    "zone": row[SheetsInventoryMeta.zone.index],
+                    "info": row[SheetsInventoryMeta.info.index],
+                    "pot": str(row[SheetsInventoryMeta.pot.index]),
+                    "price": row[SheetsInventoryMeta.price.index],
+                    "location": str(row[SheetsInventoryMeta.location.index]),
                 }))
             except Exception as e:
                 print(i, row)
