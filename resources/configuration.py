@@ -7,6 +7,13 @@ class Configuration:
 
     def __init__(self):
         self.fuzzy_match_threshold = 95
+        self.image_search_folders = {
+            "Veggies": "1zrgXvPJl3E7QK70OINvRQq_dbpW_c9VT",
+            "Trees and Shrubs": "1rVevYOv3WSjMCC_ZF-qYA5OyK1M3v59U",
+            "Perennials": "16zF5McGKenWTNKhf5-5HryaPuf9pF88b",
+            "Houseplants": "1NH7ohsDwaDxs0aCZywPw8V6AygAdyCnE",
+            "Herbs": "1NaCCovJKdNiaEW5B7AhLmAKNwzCeRrYz",
+        }
 
         self.plants = {
             "title": "{scientific_name} ({common_name})",
@@ -108,14 +115,14 @@ class Configuration:
         plant["option_name_1"] = "Pot"
 
         if "tree" in plant["tags"] or "shrub" in plant["tags"]:
-            plant["product_page"] = "Trees and Shrubs"
+            plant["product_page"] = "trees-and-shrubs"
 
             plant["option_value_1"] = "gal"
             plant["price"] = 8.99
 
             output.append(copy.deepcopy(plant))
         else:
-            plant["product_page"] = "Perennials"
+            plant["product_page"] = "perennials"
 
             plant["option_value_1"] = "4\""
             plant["price"] = 4.99
@@ -152,9 +159,9 @@ class Configuration:
         if "veggie" in veggie["tags"] and "herb" in veggie["tags"]:
             raise Exception("What's an herb veggie?")
         elif "veggie" in veggie["tags"]:
-            veggie["product_page"] = "Veggies"
+            veggie["product_page"] = "veggies"
         elif"herb" in veggie["tags"]:
-            veggie["product_page"] = "Herbs"
+            veggie["product_page"] = "herbs"
         else:
             raise Exception("This veggie isn't a veggie or herb.")
 
@@ -182,6 +189,9 @@ class Configuration:
             elif tag == "drought":
                 continue
             houseplant["categories"].append(tag.title())
+
+        houseplant["product_page"] = "houseplants"
+
 
         output.append(copy.deepcopy(houseplant))
 

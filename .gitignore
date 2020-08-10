@@ -131,8 +131,7 @@ dmypy.json
 # local
 .direnv
 .envrc
-credentials.json
-token.pickle
-raw_data.pickle
+*_credentials.json
+*.pickle
 data
 .DS_Store

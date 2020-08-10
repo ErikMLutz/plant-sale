@@ -10,12 +10,8 @@ from settings import GOOGLE_API_SCOPES
 # If modifying these scopes, delete the file token.pickle.
 SCOPES = GOOGLE_API_SCOPES
 
-# The ID and range of a sample spreadsheet.
-SAMPLE_SPREADSHEET_ID = '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms'
-SAMPLE_RANGE_NAME = 'Class Data!A2:E'
 
-
-class SheetsClient:
+class DriveClient:
     def __init__(self):
         creds = None
         # The file token.pickle stores the user's access and refresh tokens, and is
@@ -30,34 +26,37 @@ class SheetsClient:
                 creds.refresh(Request())
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
-                        'sheets_credentials.json', SCOPES)
+                    'drive_credentials.json', SCOPES)
                 creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
             with open('token.pickle', 'wb') as token:
                 pickle.dump(creds, token)
 
-        self.service = build('sheets', 'v4', credentials=creds)
+        self.service = build('drive', 'v3', credentials=creds)
 
-    def get_range(self, spreadsheet_id, spreadsheet_range):
-        sheet = self.service.spreadsheets()
-        result = sheet.values().get(
-            spreadsheetId=spreadsheet_id,
-            range=spreadsheet_range,
-            valueRenderOption='UNFORMATTED_VALUE',
-        ).execute()
-        return result.get('values', [])
+    def list_files_in_folder(self, folder_id=None):
+        page_token = None
+        files = []
+        while True:
+            response = self.service.files().list(q=f"'{folder_id}' in parents" if folder_id else None,
+                                                  fields='nextPageToken, files(id, name)',
+                                                  pageToken=page_token).execute()
+            for file in response.get('files', []):
+                files.append({"name": file.get("name"), "id": file.get("id")})
+            page_token = response.get('nextPageToken', None)
+            if page_token is None:
+                break
+
+        return files
 
 
 def main():
-    """Shows basic usage of the Sheets API.
-    Prints values from a sample spreadsheet.
+    """Shows basic usage of the Drive v3 API.
+    Prints the names and ids of the first 10 files the user has access to.
     """
 
-    client = SheetsClient()
-    values = client.get_range(SAMPLE_SPREADSHEET_ID, SAMPLE_RANGE_NAME)
-
-    for row in values:
-        print(row)
+    client = DriveClient()
+    client.list_files_in_folder()
 
 if __name__ == '__main__':
     main()

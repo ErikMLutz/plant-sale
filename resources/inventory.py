@@ -7,8 +7,9 @@ import marshmallow
 
 from fuzzywuzzy import process
 
+from drive import DriveClient
 from sheets import SheetsClient, SheetsInventoryMeta, SheetsInventorySchema
-from squarespace import SquareSpaceInventorySchema
+from squarespace import SquareSpaceInventorySchema, INVENTORY_HEADER
 from resources.configuration import Configuration
 
 CONFIGURATION = Configuration()
@@ -17,46 +18,49 @@ FUZZY_MATCH_THRESHOLD = CONFIGURATION.fuzzy_match_threshold
 
 class Inventory:
     def __init__(self):
-        print("Getting data... ", end="")
-        self.get_data()
+        # print("Getting data... ", end="")
+        # self.get_data()
+        # print("Success!")
+
+        print("Getting image metadata... ", end="")
+        self.get_image_metadata()
         print("Success!")
 
-        print("Cleaning Plants... ", end="")
-        self.plants = self.clean(self.plants_raw)
-        print("Success!")
+        # print("Cleaning Plants... ", end="")
+        # self.plants = self.clean(self.plants_raw)
+        # print("Success!")
 
-        print("Cleaning Veggies... ", end="")
-        self.veggies = self.clean(self.veggies_raw)
-        print("Success!")
+        # print("Cleaning Veggies... ", end="")
+        # self.veggies = self.clean(self.veggies_raw)
+        # print("Success!")
 
-        print("Cleaning Houseplants... ", end="")
-        self.houseplants = self.clean(self.houseplants_raw)
-        print("Success!")
+        # print("Cleaning Houseplants... ", end="")
+        # self.houseplants = self.clean(self.houseplants_raw)
+        # print("Success!")
 
-        print("Transforming Plants... ", end="")
-        self.plants = self.transform(self.plants, CONFIGURATION.plants)
-        print("Success!")
+        # print("Transforming Plants... ", end="")
+        # self.plants = self.transform(self.plants, CONFIGURATION.plants)
+        # print("Success!")
 
-        print("Transforming Veggies... ", end="")
-        self.veggies = self.transform(self.veggies, CONFIGURATION.veggies)
-        print("Success!")
+        # print("Transforming Veggies... ", end="")
+        # self.veggies = self.transform(self.veggies, CONFIGURATION.veggies)
+        # print("Success!")
 
-        print("Transforming Houseplants... ", end="")
-        self.houseplants = self.transform(self.houseplants, CONFIGURATION.houseplants)
-        print("Success!")
+        # print("Transforming Houseplants... ", end="")
+        # self.houseplants = self.transform(self.houseplants, CONFIGURATION.houseplants)
+        # print("Success!")
 
-        print("Writing Plants... ", end="")
-        self.plants = self.write("data/plants.csv", self.plants)
-        print("Success!")
+        # print("Writing Plants... ", end="")
+        # self.plants = self.write("data/plants.csv", self.plants)
+        # print("Success!")
 
-        print("Writing Veggies... ", end="")
-        self.plants = self.write("data/veggies.csv", self.veggies)
-        print("Success!")
+        # print("Writing Veggies... ", end="")
+        # self.plants = self.write("data/veggies.csv", self.veggies)
+        # print("Success!")
 
-        print("Writing Houseplants... ", end="")
-        self.plants = self.write("data/houseplants.csv", self.houseplants)
-        print("Success!")
-
+        # print("Writing Houseplants... ", end="")
+        # self.plants = self.write("data/houseplants.csv", self.houseplants)
+        # print("Success!")
 
     def get_data(self):
         """
@@ -99,6 +103,30 @@ class Inventory:
                 "veggies": self.veggies_raw,
                 "houseplants": self.houseplants_raw,
             }, f)
+
+    def get_image_metadata(self):
+        """
+        Pulls image metadata from Drive folder
+        """
+
+        # pull data from pickled store if available
+        if os.path.exists("raw_image_metadata.pickle"):
+            print("from pickled store... ", end="")
+            with open("raw_image_metadata.pickle", "rb") as f:
+                data = pickle.load(f)
+                self.image_metadata_raw = data["image_metadata"]
+
+            return
+
+        print("from online folder... ", end="")
+        client = DriveClient()
+
+        self.image_metadata_raw = []
+        for folder_id in CONFIGURATION.image_search_folders.values():
+            self.image_metadata_raw += client.list_files_in_folder(folder_id=folder_id)   
+
+        with open("raw_image_metadata.pickle", "wb+") as f:
+            pickle.dump({"image_metadata": self.image_metadata_raw}, f)
 
     def clean(self, data):
         data = copy.deepcopy(data)
@@ -150,7 +178,21 @@ class Inventory:
                     "image_url": item["image_url"],
                 })
 
-                transformed_data += transform_configuration["post_load"](copy.deepcopy(transformed_item))
+                post_load_data = transform_configuration["post_load"](copy.deepcopy(transformed_item))
+                for i in range(1, len(post_load_data)):
+                    for column in [
+                        "product_type",
+                        "product_page",
+                        "product_url",
+                        "title",
+                        "description",
+                        "categories",
+                        "tags",
+                        "visible",
+                    ]:
+                        post_load_data[i][column] = None
+
+                transformed_data += post_load_data
             except Exception as e:
                 print(item)
                 raise e
@@ -180,12 +222,15 @@ class Inventory:
         return list(transformed_tags)
 
     def write(self, file_name, data):
+        schema = SquareSpaceInventorySchema(many=True)
+
+        serialized_data = schema.dump(copy.deepcopy(data))
         with open(file_name, 'w+', newline='') as f:
             fieldnames = list(SquareSpaceInventorySchema._declared_fields.keys())
             writer = csv.DictWriter(f, fieldnames=fieldnames)
 
-            writer.writeheader()
-            for item in data:
+            writer.writerow(INVENTORY_HEADER)
+            for item in serialized_data:
                 writer.writerow(item)
 
 
