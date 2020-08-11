@@ -39,10 +39,10 @@ class DriveClient:
         files = []
         while True:
             response = self.service.files().list(q=f"'{folder_id}' in parents" if folder_id else None,
-                                                  fields='nextPageToken, files(id, name)',
+                                                  fields='nextPageToken, files(id, name, webContentLink)',
                                                   pageToken=page_token).execute()
             for file in response.get('files', []):
-                files.append({"name": file.get("name"), "id": file.get("id")})
+                files.append({"name": file.get("name"), "id": file.get("id"), "download": file.get("webContentLink")})
             page_token = response.get('nextPageToken', None)
             if page_token is None:
                 break

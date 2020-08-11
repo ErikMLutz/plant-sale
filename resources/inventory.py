@@ -2,10 +2,11 @@ import re
 import os
 import csv
 import copy
+import pprint
 import pickle
 import marshmallow
 
-from fuzzywuzzy import process
+from fuzzywuzzy import fuzz, process
 
 from drive import DriveClient
 from sheets import SheetsClient, SheetsInventoryMeta, SheetsInventorySchema
@@ -18,49 +19,53 @@ FUZZY_MATCH_THRESHOLD = CONFIGURATION.fuzzy_match_threshold
 
 class Inventory:
     def __init__(self):
-        # print("Getting data... ", end="")
-        # self.get_data()
-        # print("Success!")
+        print("Getting data... ", end="")
+        self.get_data()
+        print("Success!")
 
         print("Getting image metadata... ", end="")
         self.get_image_metadata()
         print("Success!")
 
-        # print("Cleaning Plants... ", end="")
-        # self.plants = self.clean(self.plants_raw)
-        # print("Success!")
+        print("Cleaning Image Metadata... ", end="")
+        self.image_metadata = self.clean_image_metadata(self.image_metadata_raw)
+        print("Success!")
 
-        # print("Cleaning Veggies... ", end="")
-        # self.veggies = self.clean(self.veggies_raw)
-        # print("Success!")
+        print("Cleaning Plants... ", end="")
+        self.plants = self.clean(self.plants_raw)
+        print("Success!")
 
-        # print("Cleaning Houseplants... ", end="")
-        # self.houseplants = self.clean(self.houseplants_raw)
-        # print("Success!")
+        print("Cleaning Veggies... ", end="")
+        self.veggies = self.clean(self.veggies_raw)
+        print("Success!")
 
-        # print("Transforming Plants... ", end="")
-        # self.plants = self.transform(self.plants, CONFIGURATION.plants)
-        # print("Success!")
+        print("Cleaning Houseplants... ", end="")
+        self.houseplants = self.clean(self.houseplants_raw)
+        print("Success!")
 
-        # print("Transforming Veggies... ", end="")
-        # self.veggies = self.transform(self.veggies, CONFIGURATION.veggies)
-        # print("Success!")
+        print("Transforming Plants... ", end="")
+        self.plants = self.transform(self.plants, CONFIGURATION.plants)
+        print("Success!")
 
-        # print("Transforming Houseplants... ", end="")
-        # self.houseplants = self.transform(self.houseplants, CONFIGURATION.houseplants)
-        # print("Success!")
+        print("Transforming Veggies... ", end="")
+        self.veggies = self.transform(self.veggies, CONFIGURATION.veggies)
+        print("Success!")
 
-        # print("Writing Plants... ", end="")
-        # self.plants = self.write("data/plants.csv", self.plants)
-        # print("Success!")
+        print("Transforming Houseplants... ", end="")
+        self.houseplants = self.transform(self.houseplants, CONFIGURATION.houseplants)
+        print("Success!")
 
-        # print("Writing Veggies... ", end="")
-        # self.plants = self.write("data/veggies.csv", self.veggies)
-        # print("Success!")
+        print("Writing Plants... ", end="")
+        self.plants = self.write("data/plants.csv", self.plants)
+        print("Success!")
 
-        # print("Writing Houseplants... ", end="")
-        # self.plants = self.write("data/houseplants.csv", self.houseplants)
-        # print("Success!")
+        print("Writing Veggies... ", end="")
+        self.plants = self.write("data/veggies.csv", self.veggies)
+        print("Success!")
+
+        print("Writing Houseplants... ", end="")
+        self.plants = self.write("data/houseplants.csv", self.houseplants)
+        print("Success!")
 
     def get_data(self):
         """
@@ -128,6 +133,47 @@ class Inventory:
         with open("raw_image_metadata.pickle", "wb+") as f:
             pickle.dump({"image_metadata": self.image_metadata_raw}, f)
 
+    def clean_image_metadata(self, data):
+        data = copy.deepcopy(data)
+        cleaned_data = []
+
+        for image in data:
+            name = image["name"].lower()
+            name = re.sub(r"[\d\(\)\._]", " ", name)
+            name = re.sub(r"\s+", " ", name)
+            name = re.sub(r"jpg", " ", name)
+
+            cleaned_data.append({
+                "name": image["name"],
+                "cleaned_name": name,
+                "id": image["id"],
+                "download": image["download"],
+            })
+
+        return cleaned_data
+
+    def match_image_metadata(self, item):
+        query = f"{item['scientific_name']} {item['common_name']}".lower()
+        choices = {image["download"]: image["cleaned_name"] for image in self.image_metadata}
+
+        matches = []
+        for scorer in [
+            fuzz.token_set_ratio,
+            fuzz.token_sort_ratio,
+        ]:
+            matches.append(process.extractOne(query, choices, scorer=scorer))
+
+        matches = sorted(matches, key=lambda item: item[1])
+
+        if not matches:
+            return None
+
+        match = matches[-1]
+        if match[1] >= CONFIGURATION.fuzzy_match_image_metadata_threshold:
+            return match[2]
+        else:
+            return None
+
     def clean(self, data):
         data = copy.deepcopy(data)
         schema = SheetsInventorySchema()
@@ -170,13 +216,17 @@ class Inventory:
 
         for item in data:
             try:
-                transformed_item = schema.load({
-                    "title": transform_configuration["title"].format(**item),
-                    "description": f"<p>{item['info']}, {item['zone']}</p>",
-                    "stock": 0,
-                    "tags": self.transform_tags(item["category"] + "," + item["tags"], transform_configuration["tags"]),
-                    "image_url": item["image_url"],
-                })
+                title = transform_configuration["title"].format(**item)
+                description = f"<p>{item['info']}, {item['zone']}</p>"
+                tags = self.transform_tags(
+                    item["category"] + "," + item["tags"],
+                    transform_configuration["tags"]
+                )
+                image_url = self.match_image_metadata(item)
+
+                transformed_item = schema.load(dict(
+                    title=title, description=description, tags=tags, image_url=image_url,
+                ))
 
                 post_load_data = transform_configuration["post_load"](copy.deepcopy(transformed_item))
                 for i in range(1, len(post_load_data)):
@@ -192,9 +242,10 @@ class Inventory:
                     ]:
                         post_load_data[i][column] = None
 
+
                 transformed_data += post_load_data
             except Exception as e:
-                print(item)
+                pprint.pprint(item)
                 raise e
 
         return transformed_data

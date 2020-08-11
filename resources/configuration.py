@@ -7,6 +7,7 @@ class Configuration:
 
     def __init__(self):
         self.fuzzy_match_threshold = 95
+        self.fuzzy_match_image_metadata_threshold = 75
         self.image_search_folders = {
             "Veggies": "1zrgXvPJl3E7QK70OINvRQq_dbpW_c9VT",
             "Trees and Shrubs": "1rVevYOv3WSjMCC_ZF-qYA5OyK1M3v59U",
