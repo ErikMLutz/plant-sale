@@ -161,18 +161,26 @@ class Inventory:
             fuzz.token_set_ratio,
             fuzz.token_sort_ratio,
         ]:
-            matches.append(process.extractOne(query, choices, scorer=scorer))
+            matches += process.extractBests(query, choices, scorer=scorer, limit=5)
 
+        # deduplicate matches from different scorers
+        best_matches = {}
+        for match in matches:
+            best_matches[match[2]] = [
+                match[0],
+                max(match[1], best_matches.get(match[-1], [0, 0, 0])[1]),
+                match[2]
+            ]
+        matches = list(best_matches.values())
+
+        matches = filter(lambda match: match[1] >= CONFIGURATION.fuzzy_match_image_metadata_threshold, matches)
         matches = sorted(matches, key=lambda item: item[1])
+        matches = [match[2] for match in matches]
 
         if not matches:
             return None
 
-        match = matches[-1]
-        if match[1] >= CONFIGURATION.fuzzy_match_image_metadata_threshold:
-            return match[2]
-        else:
-            return None
+        return ",".join(matches)
 
     def clean(self, data):
         data = copy.deepcopy(data)
@@ -214,7 +222,13 @@ class Inventory:
         transformed_data = []
         schema = SquareSpaceInventorySchema()
 
-        for item in data:
+        sorted_data = sorted(
+            copy.deepcopy(data),
+            key=lambda item: transform_configuration["title"].format(**item),
+            reverse=True,
+        )
+
+        for item in sorted_data:
             try:
                 title = transform_configuration["title"].format(**item)
                 description = f"<p>{item['info']}, {item['zone']}</p>"
@@ -239,6 +253,7 @@ class Inventory:
                         "categories",
                         "tags",
                         "visible",
+                        "image_url",
                     ]:
                         post_load_data[i][column] = None
 
