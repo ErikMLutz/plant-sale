@@ -257,7 +257,6 @@ class Inventory:
                     ]:
                         post_load_data[i][column] = None
 
-
                 transformed_data += post_load_data
             except Exception as e:
                 pprint.pprint(item)

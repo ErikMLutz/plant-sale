@@ -111,7 +111,7 @@ class Configuration:
         for tag in plant["tags"]:
             if tag == "reg water":
                 continue
-            plant["categories"].append(tag.title())
+            plant["categories"].append(tag.replace(" ", "-"))
 
         plant["option_name_1"] = "Pot"
 
@@ -153,9 +153,9 @@ class Configuration:
         if match_pepper and match_tomato:
             raise Exception("What's a tomato pepper?")
         elif match_pepper:
-            veggie["categories"].append("Peppers")
+            veggie["categories"].append("peppers")
         elif match_tomato:
-            veggie["categories"].append("Tomatoes")
+            veggie["categories"].append("tomatoes")
 
         if "veggie" in veggie["tags"] and "herb" in veggie["tags"]:
             raise Exception("What's an herb veggie?")
@@ -189,7 +189,9 @@ class Configuration:
                 continue
             elif tag == "drought":
                 continue
-            houseplant["categories"].append(tag.title())
+            elif tag == "houseplant":
+                continue
+            houseplant["categories"].append(tag.replace(" ", "-"))
 
         houseplant["product_page"] = "houseplants"
 
