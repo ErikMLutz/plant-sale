@@ -180,7 +180,7 @@ class Inventory:
         if not matches:
             return None
 
-        return ",".join(matches)
+        return " ".join(matches)
 
     def clean(self, data):
         data = copy.deepcopy(data)
