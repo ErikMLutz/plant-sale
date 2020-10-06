@@ -27,6 +27,8 @@ class Inventory:
             "herbs": set(),
         }
 
+        self.title_map = {}
+
         print("Getting data... ", end="")
         self.get_data()
         print("Success!")
@@ -73,6 +75,13 @@ class Inventory:
 
         print("Writing Houseplants... ", end="")
         self.plants = self.write("data/houseplants.csv", self.houseplants)
+        print("Success!")
+
+        print("Writing Title Map... ", end="")
+        with open("title_map.csv", "w+") as f:
+            f.write("sku,scientific_name,common_name,title\n")
+            for (sku, scientific_name, common_name), title in self.title_map.items():
+                f.write(f"{str(sku)},{scientific_name},{common_name},{title}".replace("\n", " ") + "\n")
         print("Success!")
 
         print("\nCategories:")
@@ -242,6 +251,8 @@ class Inventory:
         for item in sorted_data:
             try:
                 title = transform_configuration["title"].format(**item)
+                self.title_map[(item["sku"], item["scientific_name"], item["common_name"])] = title
+
                 description = f"<p>{item['info']}, {item['zone']}</p>"
                 tags = self.transform_tags(
                     item["category"] + "," + item["tags"],
