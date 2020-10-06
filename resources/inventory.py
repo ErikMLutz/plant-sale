@@ -19,6 +19,14 @@ FUZZY_MATCH_THRESHOLD = CONFIGURATION.fuzzy_match_threshold
 
 class Inventory:
     def __init__(self):
+        self.categories = {
+            "perennials": set(),
+            "trees-and-shrubs": set(),
+            "veggies": set(),
+            "houseplants": set(),
+            "herbs": set(),
+        }
+
         print("Getting data... ", end="")
         self.get_data()
         print("Success!")
@@ -66,6 +74,9 @@ class Inventory:
         print("Writing Houseplants... ", end="")
         self.plants = self.write("data/houseplants.csv", self.houseplants)
         print("Success!")
+
+        print("\nCategories:")
+        pprint.pprint(self.categories)
 
     def get_data(self):
         """
@@ -180,7 +191,7 @@ class Inventory:
         if not matches:
             return None
 
-        return " ".join(matches)
+        return matches
 
     def clean(self, data):
         data = copy.deepcopy(data)
@@ -256,6 +267,8 @@ class Inventory:
                         "image_url",
                     ]:
                         post_load_data[i][column] = None
+
+                self.categories[post_load_data[0]["product_page"]] |= set(post_load_data[0]["categories"])
 
                 transformed_data += post_load_data
             except Exception as e:

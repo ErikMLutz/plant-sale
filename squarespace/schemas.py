@@ -56,11 +56,13 @@ class SquareSpaceInventorySchema(marshmallow.Schema):
     width = marshmallow.fields.Float(missing=0.0)
     height = marshmallow.fields.Float(missing=0.0)
     visible = marshmallow.fields.String(missing="Yes", validate=marshmallow.validate.OneOf(["No", "Yes"]))
-    image_url = marshmallow.fields.URL(missing=None)
+    image_url = marshmallow.fields.List(marshmallow.fields.URL(), missing=None)
 
     @marshmallow.post_dump
     def join_lists(self, data, many, **kwargs):
         for list_field in ["categories", "tags"]:
             data[list_field] = ", ".join(data[list_field] or [])
+
+        data["image_url"] = " ".join(data["image_url"] or [])
 
         return data
