@@ -136,3 +136,4 @@ dmypy.json
 data
 .DS_Store
 title_map.csv
+archive/

@@ -79,9 +79,9 @@ class Inventory:
 
         print("Writing Title Map... ", end="")
         with open("title_map.csv", "w+") as f:
-            f.write("sku,scientific_name,common_name,title\n")
+            f.write("SKU\tFull Name\tTitle\n")
             for (sku, scientific_name, common_name), title in self.title_map.items():
-                f.write(f"{str(sku)},{scientific_name},{common_name},{title}".replace("\n", " ") + "\n")
+                f.write(f"{str(sku)}\t{scientific_name} ({common_name})\t{title}".replace("\n", " ") + "\n")
         print("Success!")
 
         print("\nCategories:")
