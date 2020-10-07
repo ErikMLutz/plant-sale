@@ -79,9 +79,9 @@ class Inventory:
 
         print("Writing Title Map... ", end="")
         with open("title_map.csv", "w+") as f:
-            f.write("SKU\tFull Name\tTitle\n")
-            for (sku, scientific_name, common_name), title in self.title_map.items():
-                f.write(f"{str(sku)}\t{scientific_name} ({common_name})\t{title}".replace("\n", " ") + "\n")
+            f.write("SKU\tMatch String\tPot\tTitle\n")
+            for (sku, scientific_name, common_name, pot), title in self.title_map.items():
+                f.write(f"{str(sku)}\t{scientific_name} ({common_name})\t{pot}\t{title}".replace("\n", " ") + "\n")
         print("Success!")
 
         print("\nCategories:")
@@ -107,20 +107,26 @@ class Inventory:
         print("from online spreadsheet... ", end="")
         client = SheetsClient()
 
-        self.plants_raw = client.get_range(
-            os.environ["PLANT_SALE_INVENTORY_SPREADSHEET_ID"],
-            "!".join([SheetsInventoryMeta.plants_sheet, SheetsInventoryMeta.spreadsheet_range])
-        )
+        self.plants_raw = []
+        for sheet in SheetsInventoryMeta.plants_sheet:
+            self.plants_raw += client.get_range(
+                os.environ["PLANT_SALE_INVENTORY_SPREADSHEET_ID"],
+                "!".join([f"'{sheet}'", SheetsInventoryMeta.spreadsheet_range])
+            )
 
-        self.veggies_raw = client.get_range(
-            os.environ["PLANT_SALE_INVENTORY_SPREADSHEET_ID"],
-            "!".join([SheetsInventoryMeta.veggies_sheet, SheetsInventoryMeta.spreadsheet_range])
-        )
+        self.veggies_raw = []
+        for sheet in SheetsInventoryMeta.veggies_sheet:
+            self.veggies_raw += client.get_range(
+                os.environ["PLANT_SALE_INVENTORY_SPREADSHEET_ID"],
+                "!".join([f"'{sheet}'", SheetsInventoryMeta.spreadsheet_range])
+            )
 
-        self.houseplants_raw = client.get_range(
-            os.environ["PLANT_SALE_INVENTORY_SPREADSHEET_ID"],
-            "!".join([SheetsInventoryMeta.houseplants_sheet, SheetsInventoryMeta.spreadsheet_range])
-        )
+        self.houseplants_raw = []
+        for sheet in SheetsInventoryMeta.houseplants_sheet:
+            self.houseplants_raw += client.get_range(
+                os.environ["PLANT_SALE_INVENTORY_SPREADSHEET_ID"],
+                "!".join([f"'{sheet}'", SheetsInventoryMeta.spreadsheet_range])
+            )
 
         with open("raw_data.pickle", "wb+") as f:
             pickle.dump({
@@ -251,7 +257,7 @@ class Inventory:
         for item in sorted_data:
             try:
                 title = transform_configuration["title"].format(**item)
-                self.title_map[(item["sku"], item["scientific_name"], item["common_name"])] = title
+                self.title_map[(item["sku"], item["scientific_name"], item["common_name"], item["pot"])] = title
 
                 description = f"<p>{item['info']}, {item['zone']}</p>"
                 tags = self.transform_tags(

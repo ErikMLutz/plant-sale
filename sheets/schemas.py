@@ -20,9 +20,9 @@ class SheetsInventoryMeta:
     location = ColumnEnum("N")
 
     spreadsheet_range = "A2:N"
-    plants_sheet = "Plants"
-    veggies_sheet = "Veggies"
-    houseplants_sheet = "Houseplants"
+    plants_sheet = ["Perennials", "Trees and Shrubs"]
+    veggies_sheet = ["Veggies", "Herbs"]
+    houseplants_sheet = ["Houseplants"]
 
     # index of location column + 1
     number_of_columns = ColumnEnum("N").index + 1

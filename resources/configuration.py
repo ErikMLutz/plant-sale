@@ -34,6 +34,7 @@ class Configuration:
                     "shrub",
                     ],
                 "exclude": [
+                    "veggie",
                 ],
                 "replace": {},
                 "exceptions": {
