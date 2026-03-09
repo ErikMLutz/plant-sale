@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Plant Sale Sign Generator</title>
+  <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+  <style>
+    body {
+      font-family: Georgia, serif;
+      background: #f5f5f0;
+      color: #2d2d2d;
+      max-width: 700px;
+      margin: 40px auto;
+      padding: 0 24px;
+    }
+    h1 { color: #2d5a27; margin-bottom: 4px; }
+    p.subtitle { color: #555; margin-top: 0; font-size: 0.95em; }
+    .plant-list {
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      padding: 16px 20px;
+      margin: 20px 0;
+    }
+    .plant-list h2 { margin: 0 0 10px; font-size: 1em; color: #2d5a27; text-transform: uppercase; letter-spacing: 0.05em; }
+    .plant-list ul { margin: 0; padding-left: 18px; }
+    .plant-list li { margin-bottom: 4px; font-size: 0.9em; }
+    .plant-list li em { color: #666; }
+    button {
+      background: #2d5a27;
+      color: #fff;
+      border: none;
+      padding: 12px 28px;
+      font-size: 1.05em;
+      border-radius: 5px;
+      cursor: pointer;
+      font-family: Georgia, serif;
+    }
+    button:hover { background: #3d7a37; }
+    button:disabled { background: #999; cursor: not-allowed; }
+    #status {
+      margin-top: 14px;
+      font-size: 0.9em;
+      color: #555;
+      min-height: 1.4em;
+    }
+    #status.error { color: #c0392b; }
+    #status.success { color: #2d5a27; }
+  </style>
+</head>
+<body>
+
+<h1>Plant Sale Sign Generator</h1>
+<p class="subtitle">Generates a PowerPoint file with two signs per slide (top &amp; bottom halves).</p>
+
+<div class="plant-list">
+  <h2>Test Plants (4 plants → 2 slides)</h2>
+  <ul id="plant-list-display"></ul>
+</div>
+
+<button id="gen-btn" onclick="generatePPTX()">Generate PPTX</button>
+<div id="status"></div>
+
+<script>
+/*
+ * ============================================================
+ * ARCHITECTURE OVERVIEW
+ * ============================================================
+ * This prototype is a single-file HTML page that:
+ *
+ *  1. Defines TEST_PLANTS — an array of plant objects. In the
+ *     full app, this data would come from a Google Sheet, CSV,
+ *     or database query.
+ *
+ *  2. Defines ICON_CONFIG — a central object mapping sun level,
+ *     moisture level, and boolean flags to display symbols.
+ *     In the full app these could be replaced with embedded
+ *     PNG image paths once real icon assets are available.
+ *
+ *  3. Defines SLIDE_CONFIG — layout constants (dimensions,
+ *     margins, column widths, colors, fonts). Tweak here to
+ *     adjust the visual design without touching rendering code.
+ *
+ *  4. fetchAsBase64(url) — tries to load a photo URL and return
+ *     a base64 data URI. Falls back gracefully on CORS/network
+ *     errors (logs to console, returns null).
+ *
+ *  5. addSignToSlide(slide, plant, yOffset) — renders one sign
+ *     (one plant) into the top or bottom half of a slide.
+ *     This is the core layout function. Modify it to change
+ *     the sign design.
+ *
+ *  6. generatePPTX() — orchestrates: creates PptxGenJS instance,
+ *     pairs plants into slides (2 per slide), calls addSignToSlide
+ *     for each, triggers download.
+ *
+ * TO ADAPT FOR FULL APP:
+ *  - Replace TEST_PLANTS with a fetch() call to your data source.
+ *  - Replace emoji icons in ICON_CONFIG with pptxgenjs image
+ *    objects once you have real PNG assets.
+ *  - Add a plant selection UI if you want to pick a subset.
+ *  - Consider adding a preview panel (render to canvas) for QA
+ *    before downloading.
+ * ============================================================
+ */
+
+// ─── Icon configuration ──────────────────────────────────────────────────────
+// Edit this object to change which symbols are used for each attribute.
+// Sun level keys must match the `sun_level` field in plant data.
+// Moisture keys must match the `moisture` field in plant data.
+const ICON_CONFIG = {
+  sun: {
+    full_sun:   '☀ Full Sun',
+    part_shade: '⛅ Part Shade',
+    shade:      '☁ Shade',
+  },
+  moisture: {
+    wet:     '💧💧💧 Wet',
+    average: '💧💧  Average',
+    drought: '💧     Drought Tolerant',
+  },
+  // Conditional icons — shown only when the flag is true
+  pollinator:    { show: '🦋 Pollinator Friendly' },
+  deer_resistant: { show: '🦌 Deer Resistant' },
+};
+
+// ─── Slide / layout configuration ────────────────────────────────────────────
+const SLIDE_CONFIG = {
+  // Slide dimensions in inches — adjust here to match your print size
+  slideW: 7.75,
+  slideH: 4.75,
+
+  // Each sign occupies the full slide (1 plant per slide)
+  get signH() { return this.slideH; },
+
+  // Photo column: left portion of each sign
+  photoColW: 3.0,  // inches
+
+  // Margins inside the content area
+  contentMarginX: 0.18, // inches from photo column edge
+  contentMarginY: 0.18, // inches from top of sign
+
+  // Colors
+  colors: {
+    headerGreen:    '2d5a27',  // dark green — plant name, accents
+    accentGreen:    '4a8c3f',  // medium green — bullets, highlight text
+    bodyText:       '1a1a1a',  // near-black for attribute text
+    highlightText:  '3a5f35',  // green-tinted for editorial highlight
+    photoBg:        'c8d8c4',  // muted green-gray placeholder for photo
+    dividerLine:    '2d5a27',  // horizontal rule between signs
+    iconBg:         'eaf3e8',  // very light green for icon strip bg
+    signBg:         'FFFFFF',  // white sign background
+  },
+
+  // Fonts
+  fonts: {
+    latin:     { name: 'Georgia', size: 11, italic: true, bold: false },
+    common:    { name: 'Georgia', size: 19, italic: false, bold: true },
+    attribute: { name: 'Calibri', size: 9,  italic: false, bold: false },
+    highlight: { name: 'Georgia', size: 9.5, italic: true,  bold: false },
+    icon:      { name: 'Segoe UI Emoji', size: 9, italic: false, bold: false },
+    iconLabel: { name: 'Calibri', size: 8.5, italic: false, bold: false },
+  },
+};
+
+// ─── Test plant data ──────────────────────────────────────────────────────────
+// In the full app, replace this array with data fetched from your source.
+const TEST_PLANTS = [
+  {
+    latin: 'Actaea racemosa',
+    common: 'Black Cohosh',
+    attributes_line: 'Size: 7 ft tall x 2-3 ft wide; Bloom: white, mid-late Summer; Soil: Rich woodland, Medium-Wet; Native range: North America, NC native; USDA zone: 4-8; Deer Resistance: yes',
+    highlight_line: 'Tall, wand-like spires of fragrant white flowers rise above bold woodland foliage in late summer. Long used in traditional herbal medicine.',
+    photo_url: 'https://images.squarespace-cdn.com/content/v1/5f4a95cad3716c2f59776894/1611001785369-YKLV8PXMNE4HJ8PUW8ST/Pink+Berkeley2.jpg',
+    sun_level: 'shade',
+    moisture: 'wet',
+    is_pollinator: true,
+    is_deer_resistant: true,
+  },
+  {
+    latin: 'Aesculus parviflora',
+    common: 'Bottlebrush Buckeye',
+    attributes_line: 'Size: 8-12 ft tall x 8-15 ft wide; Bloom: white bottlebrush spikes, Summer; Soil: Moist, well-drained; Native range: North America, NC native; USDA zone: 4-8; Deer Resistance: yes',
+    highlight_line: 'Large white flower spikes bloom in early summer. Forms broad colonies and provides nectar for pollinators in woodland settings.',
+    photo_url: 'https://images.squarespace-cdn.com/content/v1/5f4a95cad3716c2f59776894/1611001807097-SATH49H1BUSHSU1EIYZW/Pink+Berkeley1.jpg',
+    sun_level: 'part_shade',
+    moisture: 'average',
+    is_pollinator: true,
+    is_deer_resistant: true,
+  },
+  {
+    latin: 'Aquilegia canadensis',
+    common: 'Eastern Red Columbine',
+    attributes_line: 'Size: 1-3 ft tall x 1-2 ft wide; Bloom: red and yellow, Spring; Soil: Well-drained, rocky; Native range: North America, NC native; USDA zone: 3-8; Deer Resistance: yes',
+    highlight_line: 'Delicate nodding red and yellow flowers are irresistible to hummingbirds in spring. Self-seeds freely to naturalize a woodland garden.',
+    photo_url: null,
+    sun_level: 'part_shade',
+    moisture: 'drought',
+    is_pollinator: true,
+    is_deer_resistant: true,
+  },
+  {
+    latin: 'Arisaema triphyllum',
+    common: 'Jack-in-the-Pulpit',
+    attributes_line: 'Size: 1-2 ft tall x 1 ft wide; Bloom: green/purple spathe, Spring; Soil: Rich, moist woodland; Native range: North America, NC native; USDA zone: 4-9; Deer Resistance: no',
+    highlight_line: 'Dramatic hooded spathe conceals the "preacher" within. Produces brilliant red berries in fall that feed woodland birds.',
+    photo_url: null,
+    sun_level: 'shade',
+    moisture: 'wet',
+    is_pollinator: false,
+    is_deer_resistant: false,
+  },
+];
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+
+/**
+ * Attempt to fetch an image URL and return it as a base64 data URI
+ * with an explicit image/jpeg MIME type (Squarespace CDN URLs have no
+ * file extension, so the raw blob type may be generic/wrong).
+ * Returns null if the fetch fails (CORS, network, etc.).
+ */
+/**
+ * Convert a data URI to JPEG via Canvas, cropping to targetAspect (w/h).
+ * Uses a centered "cover" crop — fills the area without stretching.
+ */
+function convertToJpeg(dataUri, targetAspect) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const srcW = img.naturalWidth;
+      const srcH = img.naturalHeight;
+      const srcAspect = srcW / srcH;
+
+      let cropX = 0, cropY = 0, cropW = srcW, cropH = srcH;
+      if (srcAspect > targetAspect) {
+        // Image is wider than target — crop sides
+        cropW = Math.round(srcH * targetAspect);
+        cropX = Math.round((srcW - cropW) / 2);
+      } else {
+        // Image is taller than target — crop top/bottom
+        cropH = Math.round(srcW / targetAspect);
+        cropY = Math.round((srcH - cropH) / 2);
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = cropW;
+      canvas.height = cropH;
+      canvas.getContext('2d').drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+      resolve(canvas.toDataURL('image/jpeg', 0.92));
+    };
+    img.onerror = reject;
+    img.src = dataUri;
+  });
+}
+
+/**
+ * Fetch an image URL and return it in pptxgenjs data format:
+ * "image/jpeg;base64,..." (NO "data:" prefix — pptxgenjs requirement).
+ * Uses FileReader for reliable base64 encoding, with explicit MIME type
+ * forced from magic bytes (Squarespace URLs have no file extension).
+ */
+async function fetchForPptx(url) {
+  if (!url) return null;
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const arrayBuffer = await resp.arrayBuffer();
+
+    // Detect format from magic bytes (can't rely on URL extension or Content-Type)
+    const h = new Uint8Array(arrayBuffer, 0, 4);
+    let mimeType = 'image/jpeg';
+    if (h[0] === 0x89 && h[1] === 0x50) mimeType = 'image/png';
+    else if (h[0] === 0x47 && h[1] === 0x49) mimeType = 'image/gif';
+    else if (h[0] === 0x52 && h[1] === 0x49) mimeType = 'image/webp';
+
+    // Use FileReader to get initial data URI
+    const blob = new Blob([arrayBuffer], { type: mimeType });
+    const dataUri = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+
+    // PowerPoint doesn't support WebP — convert to JPEG via Canvas.
+    // Also crop to the photo column aspect ratio (cover crop, no stretching).
+    const targetAspect = (SLIDE_CONFIG.photoColW - 0.09) / SLIDE_CONFIG.signH;
+    let finalDataUri = dataUri;
+    if (mimeType === 'image/webp' || mimeType === 'image/gif' || mimeType === 'image/jpeg' || mimeType === 'image/png') {
+      finalDataUri = await convertToJpeg(dataUri, targetAspect);
+      console.log(`[photo] Cropped & converted ${mimeType} → image/jpeg (aspect ${targetAspect.toFixed(2)})`);
+    }
+
+    // Strip the "data:" prefix — pptxgenjs expects "image/jpeg;base64,..."
+    const pptxData = finalDataUri.replace(/^data:/, '');
+    console.log(`[photo] Fetched ${url.split('/').pop()}: ${mimeType}, ${Math.round(arrayBuffer.byteLength/1024)}KB, data prefix: "${pptxData.slice(0,30)}"`);
+    return pptxData;
+  } catch (err) {
+    console.warn(`[photo] Could not fetch ${url}:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Parse a semicolon-separated attributes_line string into an array of
+ * { label, value } objects.
+ * Example input: "Size: 7 ft tall; Bloom: white"
+ * Example output: [{ label: 'Size', value: '7 ft tall' }, ...]
+ */
+function parseAttributes(line) {
+  return line.split(';').map(part => {
+    const colonIdx = part.indexOf(':');
+    if (colonIdx === -1) return { label: '', value: part.trim() };
+    return {
+      label: part.slice(0, colonIdx).trim(),
+      value: part.slice(colonIdx + 1).trim(),
+    };
+  }).filter(a => a.label || a.value);
+}
+
+/**
+ * Build the icon strip text for a plant based on ICON_CONFIG.
+ * Returns an array of strings, one per icon/label to display.
+ */
+function buildIcons(plant) {
+  const icons = [];
+  // Sun
+  const sunStr = ICON_CONFIG.sun[plant.sun_level];
+  if (sunStr) icons.push(sunStr);
+  // Moisture
+  const moistStr = ICON_CONFIG.moisture[plant.moisture];
+  if (moistStr) icons.push(moistStr);
+  // Conditional
+  if (plant.is_pollinator)    icons.push(ICON_CONFIG.pollinator.show);
+  if (plant.is_deer_resistant) icons.push(ICON_CONFIG.deer_resistant.show);
+  return icons;
+}
+
+// ─── Core slide rendering ─────────────────────────────────────────────────────
+
+/**
+ * Add one sign (one plant) to `slide` at vertical offset `yOffset` inches.
+ * Signs occupy the top or bottom half of the slide.
+ *
+ * Layout within each sign:
+ *   [  Photo  |  Latin name (italic)         ]
+ *   [  Area   |  Common Name (bold, large)   ]
+ *   [         |  • Attribute bullets         ]
+ *   [         |  Highlight text (italic)     ]
+ *   [         |  [☀][💧][🦋][🦌] icons      ]
+ *
+ * @param {object} slide     - pptxgenjs slide object
+ * @param {object} plant     - plant data object
+ * @param {number} yOffset   - top of this sign in inches (0 or signH)
+ * @param {string|null} photoData - base64 data URI or null
+ */
+function addSignToSlide(slide, plant, yOffset, photoData) {
+  const C = SLIDE_CONFIG;
+  const { colors, fonts } = C;
+
+  const signH = C.signH;
+  const slideW = C.slideW;
+  const photoW = C.photoColW;
+  const contentX = photoW;
+  const contentW = slideW - photoW;
+  const mX = C.contentMarginX;
+  const mY = C.contentMarginY;
+
+  // ── Background for this sign half ──
+  slide.addShape('rect', {
+    x: 0, y: yOffset, w: slideW, h: signH,
+    fill: { color: colors.signBg },
+    line: { color: colors.signBg },
+  });
+
+  // ── Thin colored left border accent ──
+  slide.addShape('rect', {
+    x: 0, y: yOffset, w: 0.09, h: signH,
+    fill: { color: colors.headerGreen },
+    line: { color: colors.headerGreen },
+  });
+
+  // ── Photo area ──
+  if (photoData) {
+    try {
+      slide.addImage({ data: photoData, x: 0.09, y: yOffset, w: photoW - 0.09, h: signH });
+    } catch (e) {
+      console.warn('[slide] addImage failed:', e.message);
+      addPhotoPlaceholder(slide, yOffset, photoW, signH, colors);
+    }
+  } else {
+    addPhotoPlaceholder(slide, yOffset, photoW, signH, colors);
+  }
+
+  // ── Content area layout ──
+  // We'll stack elements from top to bottom inside the content area.
+  // Heights are approximate; pptx does not auto-wrap height for us.
+
+  const innerX = contentX + mX;
+  const innerW = contentW - mX * 2;
+
+  // Row positions (relative to yOffset)
+  const latinY      = yOffset + mY;
+  const latinH      = 0.30;
+  const commonY     = latinY + latinH + 0.01;
+  const commonH     = 0.52;
+  const dividerY    = commonY + commonH + 0.04;
+  const dividerH    = 0.02;
+  const attribY     = dividerY + dividerH + 0.07;
+
+  // Icon strip at bottom
+  const iconStripH  = 0.50;
+  const iconStripY  = yOffset + signH - iconStripH;
+
+  // Attributes area fills between divider and icon strip
+  const attribH     = iconStripY - attribY - 0.04;
+
+  // Highlight text — bottom portion of attrib area
+  const highlightH  = 0.45;
+  const highlightY  = iconStripY - iconStripH * 0 - highlightH - 0.08;
+  const bulletH     = highlightY - attribY - 0.04;
+
+  // ── Latin name ──
+  slide.addText(plant.latin, {
+    x: innerX, y: latinY, w: innerW, h: latinH,
+    fontSize: fonts.latin.size,
+    fontFace: fonts.latin.name,
+    italic: true,
+    color: colors.accentGreen,
+    valign: 'bottom',
+    wrap: true,
+  });
+
+  // ── Common name ──
+  slide.addText(plant.common, {
+    x: innerX, y: commonY, w: innerW, h: commonH,
+    fontSize: fonts.common.size,
+    fontFace: fonts.common.name,
+    bold: true,
+    color: colors.headerGreen,
+    valign: 'top',
+    wrap: true,
+  });
+
+  // ── Divider line under common name ──
+  slide.addShape('line', {
+    x: innerX, y: dividerY, w: innerW, h: 0,
+    line: { color: colors.headerGreen, width: 1.5 },
+  });
+
+  // ── Attribute bullets ──
+  const attrs = parseAttributes(plant.attributes_line);
+  // Build rich text runs: bold label + normal value, separated by newlines
+  const attrRuns = [];
+  attrs.forEach((attr, i) => {
+    if (i > 0) attrRuns.push({ text: '\n', options: { fontSize: fonts.attribute.size } });
+    attrRuns.push({
+      text: '• ',
+      options: { fontSize: fonts.attribute.size, color: colors.accentGreen, bold: true },
+    });
+    if (attr.label) {
+      attrRuns.push({
+        text: attr.label + ': ',
+        options: { fontSize: fonts.attribute.size, bold: true, color: colors.bodyText, fontFace: fonts.attribute.name },
+      });
+    }
+    attrRuns.push({
+      text: attr.value,
+      options: { fontSize: fonts.attribute.size, bold: false, color: colors.bodyText, fontFace: fonts.attribute.name },
+    });
+  });
+
+  slide.addText(attrRuns, {
+    x: innerX, y: attribY, w: innerW, h: bulletH,
+    valign: 'top',
+    wrap: true,
+    paraSpaceAfter: 1,
+  });
+
+  // ── Highlight editorial text ──
+  slide.addText(plant.highlight_line, {
+    x: innerX, y: highlightY, w: innerW, h: highlightH,
+    fontSize: fonts.highlight.size,
+    fontFace: fonts.highlight.name,
+    italic: true,
+    color: colors.highlightText,
+    valign: 'top',
+    wrap: true,
+  });
+
+  // ── Icon strip background ──
+  slide.addShape('rect', {
+    x: contentX, y: iconStripY, w: contentW, h: iconStripH,
+    fill: { color: colors.iconBg },
+    line: { color: colors.iconBg },
+  });
+
+  // ── Icon strip content ──
+  const icons = buildIcons(plant);
+  const iconText = icons.join('   ');
+  slide.addText(iconText, {
+    x: innerX, y: iconStripY, w: innerW, h: iconStripH,
+    fontSize: fonts.icon.size,
+    fontFace: fonts.icon.name,
+    color: colors.bodyText,
+    valign: 'middle',
+    wrap: false,
+  });
+}
+
+/**
+ * Draw a gray placeholder box in the photo area.
+ */
+function addPhotoPlaceholder(slide, yOffset, photoW, signH, colors) {
+  slide.addShape('rect', {
+    x: 0.09, y: yOffset, w: photoW - 0.09, h: signH,
+    fill: { color: colors.photoBg },
+    line: { color: colors.photoBg },
+  });
+  slide.addText('[ Photo ]', {
+    x: 0.09, y: yOffset, w: photoW - 0.09, h: signH,
+    fontSize: 12,
+    fontFace: 'Calibri',
+    color: '6a8c65',
+    align: 'center',
+    valign: 'middle',
+    italic: true,
+  });
+}
+
+/**
+ * Draw the horizontal divider line between top and bottom signs.
+ */
+function addSlideDivider(slide) {
+  const C = SLIDE_CONFIG;
+  const midY = C.signH;
+  slide.addShape('line', {
+    x: 0, y: midY, w: C.slideW, h: 0,
+    line: { color: C.colors.dividerLine, width: 3 },
+  });
+}
+
+// ─── Main generation function ─────────────────────────────────────────────────
+
+async function generatePPTX() {
+  const btn    = document.getElementById('gen-btn');
+  const status = document.getElementById('status');
+
+  btn.disabled = true;
+  status.className = '';
+  status.textContent = 'Fetching photos…';
+
+  status.textContent = 'Fetching photos…';
+  const photoDataArr = await Promise.all(TEST_PLANTS.map(p => fetchForPptx(p.photo_url)));
+
+  status.textContent = 'Building slides…';
+
+  try {
+    const pptx = new PptxGenJS();
+    pptx.layout = 'LAYOUT_WIDE'; // 13.33 x 7.5 — but we override below
+    // Use 10x7.5 for standard landscape
+    pptx.defineLayout({ name: 'SIGN_LAYOUT', width: SLIDE_CONFIG.slideW, height: SLIDE_CONFIG.slideH });
+    pptx.layout = 'SIGN_LAYOUT';
+
+    // One plant per slide
+    for (let i = 0; i < TEST_PLANTS.length; i++) {
+      const slide = pptx.addSlide();
+      slide.background = { color: SLIDE_CONFIG.colors.signBg };
+      addSignToSlide(slide, TEST_PLANTS[i], 0, photoDataArr[i]);
+    }
+
+    status.textContent = 'Generating download…';
+    await pptx.writeFile({ fileName: 'plant-sale-signs.pptx' });
+
+    status.className = 'success';
+    status.textContent = '✓ Downloaded plant-sale-signs.pptx successfully!';
+  } catch (err) {
+    console.error('[pptx] Generation failed:', err);
+    status.className = 'error';
+    status.textContent = 'Error: ' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ─── Page init ────────────────────────────────────────────────────────────────
+
+// Populate the plant list display on page load
+(function initPlantList() {
+  const ul = document.getElementById('plant-list-display');
+  TEST_PLANTS.forEach(p => {
+    const li = document.createElement('li');
+    li.innerHTML = `<strong>${p.common}</strong> &mdash; <em>${p.latin}</em>`;
+    ul.appendChild(li);
+  });
+})();
+</script>
+</body>
+</html>
