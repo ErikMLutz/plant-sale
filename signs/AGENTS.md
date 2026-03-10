@@ -38,8 +38,11 @@ Scripts load in dependency order via plain `<script>` tags at bottom of `<body>`
 - Click Import → parses both, matches plants by name, shows summary
 
 **Step 2 — Review table**
-- Editable table showing all plants sorted by: "Needs enrichment" first, then "Legacy" matches
-- Columns: Source badge, Common Name, Latin Name (editable), Photo thumbnail, Attributes (editable textarea), Highlight (editable textarea)
+- Editable table, paginated (10 per page), sorted by: Needs enrichment → AI Enriched → Manually Enriched → plants.csv
+- Columns: Source badge, Common Name, Latin Name (editable), Photo thumbnail, Attributes (editable textarea), Highlight (editable textarea), Sun / Moisture / Icons (selects + checkboxes)
+- Source badge reflects enrichment state; editing any field on a non-pending row promotes it to "Manually Enriched"
+- Pending rows show "Copy prompt" and "Fill from clipboard" buttons for manual AI enrichment workflow
+- "Download enriched plants.csv" button exports all plant data including source column
 - "Generate PPTX (N plants)" button → downloads `.pptx`
 
 #### Key data structures
@@ -52,14 +55,14 @@ Scripts load in dependency order via plain `<script>` tags at bottom of `<body>`
   category: '',         // Squarespace Categories field
   tags: '',             // Squarespace Tags field
   photo_urls: [],       // array of CDN URLs from Squarespace
-  latin: '',            // from legacy CSV match or AI (future)
+  latin: '',            // from plants.csv match or AI enrichment
   attributes_line: '',  // "Size: …; Bloom: …; Soil: …; Native range: …; USDA zone: …; Deer Resistance: …"
   highlight_line: '',   // 1–2 editorial sentences
   sun_level: '',        // 'full_sun' | 'part_shade' | 'shade'
   moisture: '',         // 'wet' | 'average' | 'drought'
   is_pollinator: false,
   is_deer_resistant: false,
-  source: 'legacy' | 'pending',
+  source: 'csv' | 'pending' | 'ai_enriched' | 'manually_enriched',
 }
 ```
 
@@ -69,11 +72,11 @@ Scripts load in dependency order via plain `<script>` tags at bottom of `<body>`
 - Key columns: `Title`, `Description` (HTML), `Categories`, `Tags`, `Hosted Image URLs` (space-separated)
 - Photos are publicly accessible Squarespace CDN URLs, served as **WebP** — must be converted to JPEG before embedding in PPTX
 
-#### Legacy `plants.csv` format
-- Comma-separated: `latin, common, attributes_line, highlight_line, page, categories, photo_file`
-- 229 rows covering the ~200 plants in the sale
+#### `plants.csv` format
+- Two supported formats (auto-detected by presence of `sun_level` column):
+  - **Original**: `latin, common, attributes_line, highlight_line, page, categories, photo_file` — icon flags derived from `categories` tags like `/sun, /part-shade, /pollinator, /deer, /drought`
+  - **Enriched** (output of "Download enriched plants.csv"): `latin, common, attributes_line, highlight_line, sun_level, moisture, is_pollinator, is_deer_resistant, source` — direct columns, preserves `ai_enriched` / `manually_enriched` source values on re-upload
 - Matched to Squarespace by normalized common name (lowercase, alphanumeric only)
-- `categories` column has icon tags like `/sun, /part-shade, /pollinator, /deer, /drought` — parsed into icon flags
 
 ---
 
@@ -116,31 +119,25 @@ Scripts load in dependency order via plain `<script>` tags at bottom of `<body>`
 Controlled by `const DEBUG = true` at top of script. Set to `false` before shipping — hides panel and removes all limits.
 
 Current toggles:
-- **Plant limit** — default 10, configurable; skips the rest of the import
-- **Pick some with legacy overlap** — when on, fills the limit with `(N−1)` legacy-matched plants + 1 pending, so both code paths are testable each run
+- **Plant limit** — default 15, configurable; skips the rest of the import
+- **Pick some with CSV overlap** — when on, fills the limit with `(N−1)` plants.csv-matched plants + 1 pending, so both code paths are testable each run
 
 Adding a new toggle: add a checkbox to the `#debug-panel` HTML, read it in `syncDebugState()`, store in `debugState`.
 
 ---
 
-## What's Next
+## AI Enrichment (Step 1.5)
 
-The remaining major feature is **AI enrichment** — for plants with `source: 'pending'` (no legacy match), call an AI API to fill in the missing fields.
+Built in `js/enrich.js`. Fills `pending` plants via OpenAI gpt-4o-mini.
 
-### Step 3 — AI Enrichment (not yet built)
+**Three enrichment paths available to users:**
+1. **Auto-enrich** — enter OpenAI API key in Step 1.5, click Enrich; processes all pending plants at concurrency 3
+2. **Copy prompt + AI** — click "Copy prompt" on a pending row, paste into any AI (Claude/ChatGPT), click "Fill from clipboard" to apply the JSON response
+3. **Manual edit** — type directly into table fields; row becomes "Manually Enriched"
 
-**UI:** An "Enrich with AI" button (or auto-run after import) that:
-1. Shows an API key input (Anthropic or OpenAI), stored in `localStorage`
-2. Processes each `pending` plant with a single AI call
-3. Updates the review table in-place as results come in (same concurrency/progress pattern as photo fetching)
+**`buildPrompt(plant, context)`** in `enrich.js` — builds the prompt sent to OpenAI (or copied for manual use). When called with empty context string, produces a self-contained prompt suitable for pasting into any AI.
 
-**Per-plant AI call inputs:**
-- `plant.common` — common name from Squarespace
-- `plant.description` — HTML-stripped Squarespace description (often minimal: "sun, well-drained soil")
-- `plant.tags` — Squarespace tags
-- `plant.category` — Squarespace category
-
-**Expected AI outputs (structured JSON):**
+**JSON output shape** (from AI, applied via `enrichPlant` or "Fill from clipboard"):
 ```json
 {
   "latin": "Actaea racemosa",
@@ -157,17 +154,14 @@ The remaining major feature is **AI enrichment** — for plants with `source: 'p
 `Size: X ft tall x Y ft wide; Bloom: color, Season; Soil: type; Native range: Continent, NC native; USDA zone: #-#; Deer Resistance: yes/moderate/no`
 Each value ≤6 words. See `initial_info/email2/plant_spreadsheet_master_rulebook.txt` for the full rulebook.
 
-**Icon fields:**
-- `sun_level`: `'full_sun'` | `'part_shade'` | `'shade'`
-- `moisture`: `'wet'` | `'average'` | `'drought'`
-- `is_pollinator`: boolean
-- `is_deer_resistant`: boolean
+**Fill from clipboard JSON parsing:** strips markdown code fences, collapses `\n\s+` (Claude/ChatGPT wrap long string values across lines, producing invalid JSON).
 
-Icon display logic lives in `ICON_CONFIG` — designed to be updated in code without touching rendering.
+**Web scraping** (`fetchAllSources` in `enrich.js`): attempts USDA JSON API + NCSU/Prairie Moon/FSUS/MBG HTML scraping before the AI call. CORS failures are logged and skipped. In practice only NCSU HTML tends to succeed; the others 404 or block browser requests.
 
-**API preference:** Anthropic (claude-sonnet-4-6 or similar). OpenAI as fallback. Key stored in `localStorage`, entered once via UI.
+## What's Next
 
-**Web lookup:** Optionally, if Anthropic's API supports web search / tool use, the AI can look up approved sources (NCSU Plant Toolbox, USDA PLANTS, Prairie Moon). Otherwise use knowledge + description only.
+- **Enrichment data sources** (TODO item 1): web scraping is unreliable. USDA API returns empty results for most plants; Prairie Moon / FSUS / MBG return 404. The copy-prompt workflow is the current practical alternative.
+- The copy prompt does not include scraped web data (blocked by the data source issue above).
 
 ---
 

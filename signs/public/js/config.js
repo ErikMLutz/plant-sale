@@ -3,7 +3,7 @@
 const DEBUG = true;
 
 // Current debug settings (kept in sync with the panel UI)
-const debugState = { limitEnabled: true, limitValue: 10, pickOverlap: true };
+const debugState = { limitEnabled: true, limitValue: 15, pickOverlap: true };
 
 function syncDebugState() {
   debugState.limitEnabled = document.getElementById('dbg-limit-enabled').checked;

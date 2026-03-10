@@ -61,29 +61,52 @@ function parseDelimited(text) {
 }
 
 /**
- * Parse legacy plants.csv into a Map keyed by normalized common name.
- * Expected headers: latin, common, attributes_line, highlight_line, page, categories, photo_file
+ * Parse plants.csv into a Map keyed by normalized common name.
+ * Supports both the original format (categories column with /tag flags)
+ * and the enriched format (direct sun_level, moisture, is_pollinator, is_deer_resistant columns).
+ * Expected headers: latin, common, attributes_line, highlight_line, [page, categories, photo_file]
  */
-function parseLegacyCsv(text) {
+function parsePlantsCsv(text) {
   const map = new Map();
   const rows = parseDelimited(text);
   if (rows.length === 0) return map;
+
+  // Detect whether this CSV has direct icon columns (enriched format) or old categories column
+  const firstRow = rows[0] || {};
+  const hasDirectIconCols = 'sun_level' in firstRow;
 
   for (const row of rows) {
     const common = row['common'] || '';
     if (!common) continue;
 
-    const cats = (row['categories'] || '').toLowerCase();
+    let sun_level, moisture, is_pollinator, is_deer_resistant;
 
-    let sun_level = '';
-    if (cats.includes('/sun') && cats.includes('/part-shade')) sun_level = 'part_shade';
-    else if (cats.includes('/part-shade')) sun_level = 'part_shade';
-    else if (cats.includes('/sun'))        sun_level = 'full_sun';
-    else if (cats.includes('/shade'))      sun_level = 'shade';
+    if (hasDirectIconCols) {
+      // Enriched CSV format: direct columns
+      sun_level         = row['sun_level']         || '';
+      moisture          = row['moisture']          || 'average';
+      is_pollinator     = row['is_pollinator']     === 'true';
+      is_deer_resistant = row['is_deer_resistant'] === 'true';
+    } else {
+      // Original format: derive from categories tag column
+      const cats = (row['categories'] || '').toLowerCase();
+      if (cats.includes('/sun') && cats.includes('/part-shade')) sun_level = 'part_shade';
+      else if (cats.includes('/part-shade')) sun_level = 'part_shade';
+      else if (cats.includes('/sun'))        sun_level = 'full_sun';
+      else if (cats.includes('/shade'))      sun_level = 'shade';
+      else sun_level = '';
 
-    let moisture = 'average';
-    if (cats.includes('/drought'))                              moisture = 'drought';
-    else if (cats.includes('/rain-garden') || cats.includes('/wet')) moisture = 'wet';
+      moisture = 'average';
+      if (cats.includes('/drought'))                                   moisture = 'drought';
+      else if (cats.includes('/rain-garden') || cats.includes('/wet')) moisture = 'wet';
+
+      is_pollinator     = cats.includes('/pollinator');
+      is_deer_resistant = cats.includes('/deer');
+    }
+
+    // Preserve enrichment source type if present, otherwise default to 'csv'
+    const rawSource = row['source'] || '';
+    const source = ['ai_enriched', 'manually_enriched'].includes(rawSource) ? rawSource : 'csv';
 
     map.set(normalizeName(common), {
       latin:           row['latin']           || '',
@@ -94,24 +117,25 @@ function parseLegacyCsv(text) {
       photo_file:      row['photo_file']      || '',
       sun_level,
       moisture,
-      is_pollinator:    cats.includes('/pollinator'),
-      is_deer_resistant: cats.includes('/deer'),
+      is_pollinator,
+      is_deer_resistant,
+      source,
     });
   }
   return map;
 }
 
 /**
- * Find the best legacy match for a Squarespace title.
+ * Find the best match for a Squarespace title in the plants.csv map.
  * Tries: exact normalized match, then partial containment in either direction.
  */
-function findLegacyMatch(title, legacyMap) {
+function findCsvMatch(title, csvMap) {
   const normTitle = normalizeName(title);
-  if (legacyMap.has(normTitle)) return legacyMap.get(normTitle);
-  for (const [key, entry] of legacyMap) {
+  if (csvMap.has(normTitle)) return csvMap.get(normTitle);
+  for (const [key, entry] of csvMap) {
     if (normTitle.startsWith(key) || normTitle.includes(key)) return entry;
   }
-  for (const [key, entry] of legacyMap) {
+  for (const [key, entry] of csvMap) {
     if (key.startsWith(normTitle) || key.includes(normTitle)) return entry;
   }
   return null;
@@ -121,7 +145,7 @@ function findLegacyMatch(title, legacyMap) {
  * Parse Squarespace TSV rows into plant objects.
  * Deduplicates by Product ID; skips variant rows (empty Title).
  */
-function parseSquarespaceRows(rows, legacyMap) {
+function parseSquarespaceRows(rows, csvMap) {
   const seen = new Set();
   const result = [];
 
@@ -138,7 +162,7 @@ function parseSquarespaceRows(rows, legacyMap) {
     const tags        = row['Tags']       || '';
     const photo_urls  = (row['Hosted Image URLs'] || '').split(/\s+/).map(u => u.trim()).filter(Boolean);
 
-    const legacy = legacyMap ? findLegacyMatch(title, legacyMap) : null;
+    const match = csvMap ? findCsvMatch(title, csvMap) : null;
 
     result.push({
       common:           title,
@@ -146,14 +170,14 @@ function parseSquarespaceRows(rows, legacyMap) {
       category,
       tags,
       photo_urls,
-      latin:            legacy ? legacy.latin           : '',
-      attributes_line:  legacy ? legacy.attributes_line : '',
-      highlight_line:   legacy ? legacy.highlight_line  : '',
-      sun_level:        legacy ? legacy.sun_level        : '',
-      moisture:         legacy ? legacy.moisture         : 'average',
-      is_pollinator:    legacy ? legacy.is_pollinator    : false,
-      is_deer_resistant: legacy ? legacy.is_deer_resistant : false,
-      source: legacy ? 'legacy' : 'pending',
+      latin:            match ? match.latin           : '',
+      attributes_line:  match ? match.attributes_line : '',
+      highlight_line:   match ? match.highlight_line  : '',
+      sun_level:        match ? match.sun_level        : '',
+      moisture:         match ? match.moisture         : 'average',
+      is_pollinator:    match ? match.is_pollinator    : false,
+      is_deer_resistant: match ? match.is_deer_resistant : false,
+      source: match ? (match.source || 'csv') : 'pending',
     });
   }
   return result;

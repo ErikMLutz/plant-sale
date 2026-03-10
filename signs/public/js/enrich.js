@@ -252,6 +252,7 @@ async function enrichPlant(plant, apiKey) {
   }
 
   merged.enrichError = false;
+  merged.source = 'ai_enriched';
 
   return merged;
 }
