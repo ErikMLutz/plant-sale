@@ -32,9 +32,13 @@ async function tryFetchText(label, url) {
     // Strip tags and collapse whitespace; take first 800 chars of useful content
     const div = document.createElement('div');
     div.innerHTML = html;
-    // Remove scripts/styles from the DOM fragment
-    div.querySelectorAll('script,style,nav,header,footer').forEach(el => el.remove());
-    const text = (div.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 800);
+    // Remove boilerplate elements before extracting text
+    div.querySelectorAll('script,style,nav,header,footer,button,a[href],noscript').forEach(el => el.remove());
+    const text = (div.textContent || '')
+      .replace(/[<>]/g, ' ')         // remove stray angle brackets
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 1000);
     if (text) console.log(`[enrich] ✓ ${label}: fetched ${text.length} chars`);
     return text ? `[${label}]\n${text}` : '';
   } catch (err) {
@@ -51,22 +55,29 @@ async function tryFetchText(label, url) {
 async function fetchUsdaJson(commonName, latinName) {
   const query = latinName || commonName;
   try {
-    const url = `https://plantsservices.sc.egov.usda.gov/api/PlantSearch?q=${encodeURIComponent(query)}&format=json`;
-    const resp = await fetch(url);
+    // API requires POST with JSON body; GET returns 405
+    const resp = await fetch('https://plantsservices.sc.egov.usda.gov/api/PlantSearch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ Text: query }),
+    });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-    const results = Array.isArray(data) ? data : (data.PlantResults || data.Results || []);
-    if (!results.length) return '';
-    const p = results[0];
+    const results = data.PlantResults || data.Results || (Array.isArray(data) ? data : []);
+    // Filter out empty placeholder results (API returns 1 empty result when nothing found)
+    const valid = results.filter(r => r.Symbol);
+    if (!valid.length) return '';
+    const p = valid[0];
     const parts = [];
-    if (p.NativeStatus)       parts.push(`Native status: ${p.NativeStatus}`);
-    if (p.Duration)           parts.push(`Duration: ${p.Duration}`);
-    if (p.GrowthHabit)        parts.push(`Growth habit: ${p.GrowthHabit}`);
-    if (p.ActiveGrowthPeriod) parts.push(`Active growth period: ${p.ActiveGrowthPeriod}`);
-    if (p.MinimumTemperature) parts.push(`Min temp (°F): ${p.MinimumTemperature}`);
-    if (p.ShadeTolerance)     parts.push(`Shade tolerance: ${p.ShadeTolerance}`);
-    if (p.MoistureUse)        parts.push(`Moisture use: ${p.MoistureUse}`);
-    if (p.DroughtTolerance)   parts.push(`Drought tolerance: ${p.DroughtTolerance}`);
+    // Array fields
+    if (p.Durations?.length)    parts.push(`Duration: ${p.Durations.join(', ')}`);
+    if (p.GrowthHabits?.length) parts.push(`Growth habit: ${p.GrowthHabits.join(', ')}`);
+    if (p.NativeStatuses?.length) parts.push(`Native status: ${p.NativeStatuses.map(s => s.Status || s).join(', ')}`);
+    // Scalar fields from Characteristics sub-object
+    const ch = p.Characteristics || {};
+    if (ch.ShadeTolerance)   parts.push(`Shade tolerance: ${ch.ShadeTolerance}`);
+    if (ch.MoistureUse)      parts.push(`Moisture use: ${ch.MoistureUse}`);
+    if (ch.DroughtTolerance) parts.push(`Drought tolerance: ${ch.DroughtTolerance}`);
     if (!parts.length) return '';
     console.log(`[enrich] ✓ USDA JSON API: ${parts.length} fields`);
     return `[USDA Plants API]\n${parts.join('; ')}`;
@@ -94,11 +105,13 @@ async function fetchAllSources(plant) {
     tryFetchText('NCSU Plant Toolbox', `https://plants.ces.ncsu.edu/plants/${latinSlug}/`),
     tryFetchText('NCSU Plant Toolbox (common)', `https://plants.ces.ncsu.edu/plants/${commonSlug}/`),
 
-    // Prairie Moon Nursery
-    tryFetchText('Prairie Moon', `https://www.prairiemoon.com/plants/${latinSlug}.html`),
+    // Prairie Moon Nursery — try both latin and common slug patterns
+    tryFetchText('Prairie Moon', `https://www.prairiemoon.com/${latinSlug}.html`),
+    tryFetchText('Prairie Moon', `https://www.prairiemoon.com/${latinSlug}-${commonSlug}.html`),
 
-    // FSUS
+    // FSUS — try both slug patterns
     tryFetchText('FSUS', `https://fsus.ncbg.unc.edu/plants/${latinSlug}`),
+    tryFetchText('FSUS', `https://fsus.ncbg.unc.edu/search?q=${encodeURIComponent(latin || common)}`),
 
     // Missouri Botanical Garden (useful for non-natives)
     tryFetchText('Missouri Botanical Garden',
@@ -116,28 +129,45 @@ async function fetchAllSources(plant) {
  * @param {string} usdaContext
  * @returns {string}
  */
-function buildPrompt(plant, usdaContext) {
+function buildPrompt(plant, context) {
   const lines = [
-    `Plant: ${plant.common}`,
+    `Plant common name: ${plant.common}`,
     `Squarespace description: ${plant.description || '(none)'}`,
     `Tags: ${plant.tags || '(none)'}`,
   ];
-  if (usdaContext) lines.push(usdaContext);
+  if (context) lines.push('\nReference data from approved sources:\n' + context);
 
   lines.push('');
-  lines.push('Return this exact JSON shape:');
+  lines.push('Return this exact JSON shape (replace ALL placeholder text with real values):');
   lines.push(JSON.stringify({
-    latin: 'full scientific name including cultivar if known',
-    attributes_line: 'Size: X ft tall x Y ft wide; Bloom: color, season; Soil: type; Native range: Continent[, NC native if applicable]; USDA zone: #-#; Deer Resistance: yes/moderate/no',
-    highlight_line: '1-2 sentences on ecological value, wildlife, or notable traits. Be specific.',
+    latin: 'genus species [cultivar if applicable] — species name only, no taxonomic author citations',
+    attributes_line: 'Size: H ft tall x W ft wide; Bloom: color, season; Soil: type; Native range: Continent[, NC native]; USDA zone: #-#; Deer Resistance: yes/moderate/no',
+    highlight_line: 'sentence 1: distinctive sensory, structural, or garden trait. sentence 2: ecological or wildlife value.',
     sun_level: 'full_sun OR part_shade OR shade',
     moisture: 'wet OR average OR drought',
-    is_pollinator: true,
-    is_deer_resistant: false,
+    is_pollinator: 'true or false',
+    is_deer_resistant: 'true or false',
   }, null, 2));
 
   lines.push('');
-  lines.push("Attributes rules: each value 6 words or fewer. Native range format: \"North America, NC native\" or \"Asia\" etc — never list individual states.");
+  lines.push([
+    'Rules:',
+    '- latin: genus + species only (e.g. "Actaea racemosa"). Include cultivar name in quotes if the plant is a named cultivar. Never add author citations like "(Pursh) Kuntze".',
+    '- attributes_line: each segment 6 words or fewer. Semicolons between segments, no trailing semicolon.',
+    '- Size: use maximum typical height × a representative width range (e.g. "7 ft tall x 2-4 ft wide"). If the source gives a spread range, include it.',
+    '- Bloom color: plain English only — white, purple, yellow, pink, red, orange, blue, green. Avoid compound terms like "lavender-blue"; use the closest simple color.',
+    '- Bloom season: Spring / early Summer / Summer / late Summer / early Fall / Fall. Use "early" or "late" prefix when bloom spans less than half a season. When bloom spans multiple seasons (e.g. July–October), anchor to the peak or starting season — prefer "early Fall" over "late Summer" when bloom continues into fall.',
+    '- Soil: describe texture/drainage first, then notable tolerance if applicable (e.g. "moist, well-drained" or "well-drained, drought tolerant"). 6 words or fewer.',
+    '- Native range: continent or region only — "North America, NC native" if native to NC, "North America" if not, "Asia", "Europe", etc. Never list US states individually.',
+    '- USDA zone: numeric range only, e.g. "4-8". Trust the reference source over other estimates.',
+    '- Deer Resistance: exactly "yes", "moderate", or "no".',
+    '- highlight_line: two sentences max. First sentence: a specific sensory, structural, or unusual trait (fragrance, bloom shape, color, texture). Second sentence: wildlife value, ecological role, notable cultural/historical use, or landscape use. Be specific — name host species or animal relationships when known. You may use verified botanical knowledge beyond the scraped reference data.',
+    '- sun_level: pick the dominant light condition. When light range spans deep shade to partial shade, use "part_shade". If full sun is listed alongside part shade, use "part_shade".',
+    '- moisture: "wet" for consistently moist/wet soils, "drought" for drought-tolerant, "average" for typical garden moisture.',
+    '- is_pollinator: true only if the plant is a documented larval host plant OR a primary nectar/pollen source for native bees or hummingbirds. General insect attraction or occasional bee visits = false.',
+    '- is_deer_resistant: true if the reference source explicitly states deer resistance or deer resistant. false if not mentioned.',
+    '- is_pollinator and is_deer_resistant: must be exactly true or false (JSON booleans, not strings).',
+  ].join('\n'));
 
   return lines.join('\n');
 }
