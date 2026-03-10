@@ -2,79 +2,170 @@
 
 ## Project Overview
 
-This project builds a desktop app to automate the creation of plant sale signs for a Master Gardener extension fundraiser. Ali (a team member) built a manual AI-assisted pipeline using ChatGPT + a Python script. We are replacing the manual ChatGPT steps with deterministic code and targeted AI calls to make the process reliable and repeatable.
+This project builds a **single-file static web app** (`prototype.html`) that generates plant sale signs as a `.pptx` file for a Master Gardener extension fundraiser. The app replaces a manual ChatGPT + Python pipeline with deterministic code and targeted AI calls.
 
-The working directory is `/Users/erik/repos/plant-sale/signs/`.
+Working directory: `/Users/erik/repos/plant-sale/signs/`
 
-**Full process documentation:** `initial_info/SUMMARY.md` — read this before starting any significant work. It covers the complete existing pipeline, all prompts, data formats, and known issues.
-
----
-
-## The Three-Stage Pipeline
-
-### Stage 1 — Plant Research → Infosheets
-- **What:** AI researches each plant from approved websites and fills a structured template into a `.docx` file
-- **Current tool:** ChatGPT (manual)
-- **Key docs:** `initial_info/email1/rulebook_infosheet_generation.txt`, `initial_info/email1/template_infosheet_blank.txt`
-- **Output:** 223 infosheet `.docx` files in `initial_info/email1/2026 plant infosheets/`
-- **Approved sources:** NCSU Plant Toolbox, USDA PLANTS, FSUS, Prairie Moon Nursery
-
-### Stage 2 — Infosheets → Structured CSV
-- **What:** Extract key attributes from infosheets into a CSV with standardized fields
-- **Current tool:** ChatGPT (manual, many cleanup passes)
-- **Key docs:** `initial_info/email2/plant_dataset_starter_prompt.txt`, `initial_info/email2/plant_spreadsheet_master_rulebook.txt`
-- **Output:** `initial_info/email2/plants.csv` (229 plants, 7 columns)
-- **CSV columns:** `latin, common, attributes_line, highlight_line, page, categories, photo_file`
-- **Attributes format:** `Size: X ft tall x Y ft wide; Bloom: color, Season; Soil: ...; Native range: Continent, NC native; USDA zone: #-#; Deer Resistance: yes/moderate/no`
-
-### Stage 3 — CSV → PowerPoint Signs
-- **What:** Python script fills a PPTX template with plant data (text + photos + icons)
-- **Current tool:** `initial_info/email3/make_plant_signs.py` (Python, v3.13.2)
-- **Template:** `two_signs_master_icons_layout_fixed.pptx` (2 signs per slide)
-- **Dependencies:** `python-pptx`, `lxml`, `Pillow`
-- **Run:** `python make_plant_signs.py --csv plants.csv --template batch_template.pptx --photos photos/ --out outputs/signs.pptx`
-- **Sign layout rules:** `initial_info/email3/plant_sign_template_rules.txt`
+**Background on the original pipeline:** `initial_info/SUMMARY.md` — worth reading for context, but not required for working on the app.
 
 ---
 
-## Key Data & Files
+## What's Been Built
 
-| File | Description |
-|------|-------------|
-| `initial_info/SUMMARY.md` | Full pipeline documentation |
-| `initial_info/email2/plants.csv` | Master plant dataset (229 rows) |
-| `initial_info/email3/make_plant_signs.py` | PPTX generation script |
-| `initial_info/email3/plant_signs_starter-kit_missingphotos.zip` | Full kit including template PPTX |
+### `prototype.html` — the entire app, one self-contained file
 
-### Plant Sign Layout
-Each slide has 2 signs (top/bottom). Each sign has:
-- **Name box:** Latin name (italic 26pt) + common name (regular 26pt)
-- **Attributes box:** bulleted list — Size, Bloom, Soil, Native range, USDA zone, Deer Resistance
-- **Highlight box:** 1–2 editorial sentences
-- **Photo area:** left side, fixed frame (images cropped to fit)
-- **Icon strip:** sun level, 3 moisture drops (fill pattern encodes wet/avg/drought), butterfly icon (pollinator), deer icon (deer resistant)
+Open directly in a browser (no server needed). Uses:
+- **pptxgenjs** (CDN) for PPTX generation
+- No framework, no build step, plain JS
 
-### Known Pain Points
-1. **Icons not automated** — `categories` column in CSV is too inconsistent; human must fix icons manually
-2. **Photos** — `photo_file` column is mostly empty (`"no info provided"`); script does fuzzy Latin-name filename matching
-3. **Text overflow** — some plants have too much text; requires manual adjustment
-4. **ChatGPT unreliability** — AI forgets rules mid-session; strict rulebooks were developed to combat this
+#### App flow
+
+**Step 1 — Import**
+- Paste or upload the **Squarespace product export** (TSV or CSV, auto-detected)
+- Optionally paste or upload **`plants.csv`** (legacy enrichment data from Ali's prior work)
+- Click Import → parses both, matches plants by name, shows summary
+
+**Step 2 — Review table**
+- Editable table showing all plants sorted by: "Needs enrichment" first, then "Legacy" matches
+- Columns: Source badge, Common Name, Latin Name (editable), Photo thumbnail, Attributes (editable textarea), Highlight (editable textarea)
+- "Generate PPTX (N plants)" button → downloads `.pptx`
+
+#### Key data structures
+
+**Plant object** (app state array `plants[]`):
+```js
+{
+  common: '',           // from Squarespace Title
+  description: '',      // HTML-stripped Squarespace description
+  category: '',         // Squarespace Categories field
+  tags: '',             // Squarespace Tags field
+  photo_urls: [],       // array of CDN URLs from Squarespace
+  latin: '',            // from legacy CSV match or AI (future)
+  attributes_line: '',  // "Size: …; Bloom: …; Soil: …; Native range: …; USDA zone: …; Deer Resistance: …"
+  highlight_line: '',   // 1–2 editorial sentences
+  sun_level: '',        // 'full_sun' | 'part_shade' | 'shade'
+  moisture: '',         // 'wet' | 'average' | 'drought'
+  is_pollinator: false,
+  is_deer_resistant: false,
+  source: 'legacy' | 'pending',
+}
+```
+
+#### Squarespace export format
+- Tab-separated, first row headers
+- 714 unique products (deduplicated by non-empty Title — variant rows have empty Title and are skipped)
+- Key columns: `Title`, `Description` (HTML), `Categories`, `Tags`, `Hosted Image URLs` (space-separated)
+- Photos are publicly accessible Squarespace CDN URLs, served as **WebP** — must be converted to JPEG before embedding in PPTX
+
+#### Legacy `plants.csv` format
+- Comma-separated: `latin, common, attributes_line, highlight_line, page, categories, photo_file`
+- 229 rows covering the ~200 plants in the sale
+- Matched to Squarespace by normalized common name (lowercase, alphanumeric only)
+- `categories` column has icon tags like `/sun, /part-shade, /pollinator, /deer, /drought` — parsed into icon flags
 
 ---
 
-## What We're Building
+## PPTX Generation
 
-A desktop app that:
-1. Takes `plants.csv` as input (or builds it semi-automatically)
-2. Allows viewing/editing plant data
-3. Generates the PPTX signs automatically
-4. Handles icons based on structured plant attributes (not the messy `categories` column)
-5. Potentially: AI-assisted scraping of plant info from approved websites to populate the CSV
+### Slide layout
+- **1 plant per slide**, 7.75" × 4.75" (configurable in `SLIDE_CONFIG`)
+- Each slide: photo area (left ~3.0") + content area (right)
+- Content: Latin name (italic, small) → Common name (bold, 19pt) → horizontal rule → attribute bullets → highlight text → icon strip
 
-### Design Principles
-- **Deterministic code first** — only use AI where the task is genuinely non-deterministic (scraping/extracting unstructured web content, writing highlight sentences)
-- **Reliable over clever** — the ChatGPT workflow broke because AI is unreliable; code should be predictable
-- **Usable by non-technical volunteers** — GUI, not terminal
+### Key functions
+| Function | What it does |
+|---|---|
+| `addSignToSlide(slide, plant, yOffset, photoData)` | Renders one plant sign onto a slide |
+| `estimateWrappedLines(text, widthInches, fontSpec)` | Canvas-based word-wrap line counter (accurate for variable-width fonts) |
+| `fetchForPptx(url)` | Fetches CDN image, detects format via magic bytes, converts WebP/GIF → JPEG via Canvas with centered cover crop, returns `"image/jpeg;base64,..."` (no `data:` prefix — pptxgenjs format) |
+| `parseAttributes(line)` | Splits semicolon-delimited attributes string into `{label, value}` pairs |
+| `buildIcons(plant)` | Returns icon strip text array from `ICON_CONFIG` |
+| `convertToJpeg(dataUri, targetAspect)` | Canvas cover-crop + WebP→JPEG conversion |
+
+### Configuration objects (tune these, not the rendering code)
+- `SLIDE_CONFIG` — all dimensions, colors, fonts
+- `ICON_CONFIG` — maps sun/moisture/boolean flags to display strings; easy to swap for real images later
+
+### Image fetching
+- Squarespace CDN has CORS headers — fetch works from browser
+- CDN serves **WebP** regardless of URL extension → must convert via Canvas
+- Concurrency limited to **4 parallel fetches** (CPU-bound Canvas conversion; tune `CONCURRENCY` constant)
+- Progress bar updates as each image completes
+
+### Common name line wrapping
+- Uses `estimateWrappedLines()` with Canvas font metrics (much more accurate than char-count estimates)
+- Available width multiplied by **0.88** to compensate for PowerPoint's internal text box padding and slightly wider rendering
+- `0.40"` per line height — tune if signs still show overlap
+
+---
+
+## Debug Panel
+
+Controlled by `const DEBUG = true` at top of script. Set to `false` before shipping — hides panel and removes all limits.
+
+Current toggles:
+- **Plant limit** — default 10, configurable; skips the rest of the import
+- **Pick some with legacy overlap** — when on, fills the limit with `(N−1)` legacy-matched plants + 1 pending, so both code paths are testable each run
+
+Adding a new toggle: add a checkbox to the `#debug-panel` HTML, read it in `syncDebugState()`, store in `debugState`.
+
+---
+
+## What's Next
+
+The remaining major feature is **AI enrichment** — for plants with `source: 'pending'` (no legacy match), call an AI API to fill in the missing fields.
+
+### Step 3 — AI Enrichment (not yet built)
+
+**UI:** An "Enrich with AI" button (or auto-run after import) that:
+1. Shows an API key input (Anthropic or OpenAI), stored in `localStorage`
+2. Processes each `pending` plant with a single AI call
+3. Updates the review table in-place as results come in (same concurrency/progress pattern as photo fetching)
+
+**Per-plant AI call inputs:**
+- `plant.common` — common name from Squarespace
+- `plant.description` — HTML-stripped Squarespace description (often minimal: "sun, well-drained soil")
+- `plant.tags` — Squarespace tags
+- `plant.category` — Squarespace category
+
+**Expected AI outputs (structured JSON):**
+```json
+{
+  "latin": "Actaea racemosa",
+  "attributes_line": "Size: 7 ft tall x 2-3 ft wide; Bloom: white, mid-late Summer; Soil: Rich woodland, Medium-Wet; Native range: North America, NC native; USDA zone: 4-8; Deer Resistance: yes",
+  "highlight_line": "Tall, wand-like spires of fragrant white flowers rise above bold woodland foliage in late summer.",
+  "sun_level": "shade",
+  "moisture": "wet",
+  "is_pollinator": true,
+  "is_deer_resistant": true
+}
+```
+
+**Attributes format** (strict — AI must follow this):
+`Size: X ft tall x Y ft wide; Bloom: color, Season; Soil: type; Native range: Continent, NC native; USDA zone: #-#; Deer Resistance: yes/moderate/no`
+Each value ≤6 words. See `initial_info/email2/plant_spreadsheet_master_rulebook.txt` for the full rulebook.
+
+**Icon fields:**
+- `sun_level`: `'full_sun'` | `'part_shade'` | `'shade'`
+- `moisture`: `'wet'` | `'average'` | `'drought'`
+- `is_pollinator`: boolean
+- `is_deer_resistant`: boolean
+
+Icon display logic lives in `ICON_CONFIG` — designed to be updated in code without touching rendering.
+
+**API preference:** Anthropic (claude-sonnet-4-6 or similar). OpenAI as fallback. Key stored in `localStorage`, entered once via UI.
+
+**Web lookup:** Optionally, if Anthropic's API supports web search / tool use, the AI can look up approved sources (NCSU Plant Toolbox, USDA PLANTS, Prairie Moon). Otherwise use knowledge + description only.
+
+---
+
+## Design Principles
+
+- **One file** — `prototype.html` is the entire app. No build step, no server, no npm.
+- **DEBUG flag** — all dev-only UI behind `const DEBUG = true`. Flip to `false` to ship.
+- **Deterministic code first** — AI only for non-deterministic tasks (enriching plant descriptions)
+- **Icon logic in config** — `ICON_CONFIG` is the single place to change icon behavior
+- **Layout constants in config** — `SLIDE_CONFIG` for all dimensions/colors/fonts
 
 ---
 
