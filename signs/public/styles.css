@@ -133,7 +133,8 @@ tr:hover           td { background: #eaf3e8; }
 /* ── Source cell — fixed width, all children the same width ── */
 .td-source { width: 130px; }
 .td-source .badge    { display: block; box-sizing: border-box; width: 100%; text-align: center; }
-.copy-prompt-btn     { display: block; margin-top: 5px; font-size: 0.72em; padding: 2px 0; box-sizing: border-box; width: 100%; text-align: center; }
+.copy-prompt-btn,
+.row-enrich-btn      { display: block; margin-top: 5px; font-size: 0.72em; padding: 2px 0; box-sizing: border-box; width: 100%; text-align: center; }
 
 /* ── Icon fields cell ── */
 .icon-fields select { display: block; width: 100%; margin-bottom: 4px; font-size: 0.8em; font-family: Calibri, sans-serif; padding: 2px 4px; border: 1px solid #ddd; border-radius: 3px; background: #fafaf8; }

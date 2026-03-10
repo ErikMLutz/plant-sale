@@ -151,8 +151,9 @@ async function callOpenAI(plant, apiKey) {
   }
   console.groupEnd();
 
-  // output_text is the concatenated text from all message output items
-  const content = data.output_text;
+  // Extract text from the message item in the output array
+  const messageItem = data.output?.find(item => item.type === 'message');
+  const content = messageItem?.content?.find(c => c.type === 'output_text')?.text;
   if (!content) throw new Error('Empty response from OpenAI');
 
   const jsonMatch = content.match(/\{[\s\S]*\}/);
