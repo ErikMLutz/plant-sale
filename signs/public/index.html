@@ -9,10 +9,81 @@
 </head>
 <body>
 
-<h1>Plant Sale Sign Generator</h1>
-<p class="subtitle">Generates a PowerPoint file with one sign per slide.</p>
+<div style="display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+  <div>
+    <h1 style="margin:0;">Plant Sale Sign Generator</h1>
+    <p class="subtitle" style="margin:4px 0 0;">Generates a PowerPoint file with one sign per slide.</p>
+  </div>
+  <label style="display:flex; align-items:center; gap:6px; font-size:0.8em; font-family:Calibri,sans-serif; color:#aaa; cursor:pointer; user-select:none;">
+    <input type="checkbox" id="debug-toggle" onchange="toggleDebug(this.checked)" style="cursor:pointer;" />
+    Debug
+  </label>
+</div>
 
-<!-- Debug panel — controlled by DEBUG in js/config.js -->
+<!-- Settings panel — collapsed by default -->
+<details style="margin-bottom:16px;">
+  <summary style="cursor:pointer; font-size:0.85em; font-family:Calibri,sans-serif; color:#888; user-select:none; list-style:none; display:flex; align-items:center; gap:6px;">
+    <span id="settings-arrow" style="font-size:0.75em;">▶</span> Settings
+  </summary>
+  <div style="background:#f7f7f5; border:1px solid #ddd; border-radius:6px; padding:16px 20px; margin-top:8px;">
+    <div style="display:flex; flex-direction:column; gap:18px;">
+
+      <div>
+        <div style="font-size:0.88em; font-weight:bold; color:#444; font-family:Calibri,sans-serif; margin-bottom:4px;">Squarespace import filters</div>
+        <div style="font-size:0.85em; color:#777; font-family:Calibri,sans-serif; margin-bottom:10px;">
+          Applied before importing — rows that don't pass are silently excluded.
+          Use this to keep non-plant products (vegetables, herbs, houseplants) out of the sign run.
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px; font-family:Calibri,sans-serif; font-size:0.88em; color:#555;">
+          <label style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" id="cfg-filter-visible" checked onchange="syncSettings()" />
+            Only import rows where <strong>Visible = Yes</strong>
+            <span style="color:#aaa;">(skips draft / hidden products)</span>
+          </label>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <label for="cfg-excluded-pages">Exclude Product Page values:</label>
+            <input type="text" id="cfg-excluded-pages" value="veggies, herbs, houseplants"
+              style="flex:1; min-width:220px; max-width:380px; padding:3px 8px; border:1px solid #ccc; border-radius:3px; font-size:1em; font-family:Calibri,sans-serif;"
+              onchange="syncSettings()" />
+            <span style="color:#aaa;">comma-separated, case-insensitive</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:0.88em; font-weight:bold; color:#444; font-family:Calibri,sans-serif; margin-bottom:4px;">Slide size</div>
+        <div style="font-size:0.85em; color:#777; font-family:Calibri,sans-serif; margin-bottom:10px;">
+          Set these to match your PowerPoint template before generating.
+          The defaults (7.75 × 4.75 in) are standard for this sale's sign layout.
+          Only change if your printer or template requires a different canvas size.
+        </div>
+        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; font-family:Calibri,sans-serif; font-size:0.88em; color:#555;">
+          <label style="display:flex; align-items:center; gap:6px;">
+            Width (in):
+            <input type="number" id="cfg-slide-w" value="7.75" min="1" max="24" step="0.25"
+              style="width:70px; padding:3px 6px; border:1px solid #ccc; border-radius:3px; font-size:1em;"
+              onchange="syncSettings()" />
+          </label>
+          <label style="display:flex; align-items:center; gap:6px;">
+            Height (in):
+            <input type="number" id="cfg-slide-h" value="4.75" min="1" max="24" step="0.25"
+              style="width:70px; padding:3px 6px; border:1px solid #ccc; border-radius:3px; font-size:1em;"
+              onchange="syncSettings()" />
+          </label>
+          <span style="color:#aaa; font-size:0.9em;">Default: 7.75 × 4.75 in</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</details>
+<script>
+  document.querySelector('details').addEventListener('toggle', function() {
+    document.getElementById('settings-arrow').textContent = this.open ? '▼' : '▶';
+  });
+</script>
+
+<!-- Debug panel — hidden by default; shown when debug toggle is on -->
 <div id="debug-panel" style="display:none; background:#fff8e1; border:2px dashed #f39c12; border-radius:6px; padding:14px 20px; margin-bottom:20px;">
   <div style="font-size:0.8em; font-weight:bold; color:#b7770d; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px;">
     ⚠ Debug Mode
@@ -41,6 +112,17 @@
 <!-- Step 1: Import -->
 <div class="card" id="import-section">
   <h2>Step 1 — Import Data</h2>
+  <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px; display:flex; flex-direction:column; gap:6px;">
+    <p style="margin:0;">
+      <strong>Squarespace export</strong> — go to <em>Commerce → Products</em>, select all products, and export as CSV or TSV.
+      Paste the file contents or upload it. Only the product name and description columns are used.
+    </p>
+    <p style="margin:0;">
+      <strong>plants.csv</strong> — optional but recommended after your first run.
+      Upload the enriched CSV downloaded from Step 2 to skip re-enriching plants you've already filled in.
+      Plants are matched by common name; unmatched ones will need enrichment.
+    </p>
+  </div>
   <div class="import-grid">
 
     <div class="upload-area">
@@ -74,11 +156,28 @@
 <!-- Step 1.5: Enrich -->
 <div class="card" id="enrich-section" style="display:none;">
   <h2>Step 1.5 — AI Enrichment</h2>
-  <p style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px;">
-    Fills in Latin name, attributes, and highlight text for plants not in plants.csv.
-    Uses OpenAI gpt-4o-search-preview, which browses NCSU, Prairie Moon, USDA, FSUS, and MBG directly.
-    <strong>The API key is optional</strong> — you can skip this section and enrich plants manually in the review table below.
-  </p>
+  <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px; display:flex; flex-direction:column; gap:8px;">
+    <p style="margin:0;">
+      Fills in Latin name, attributes, and highlight text for plants not found in plants.csv.
+      Uses <strong>OpenAI gpt-4o</strong> with live web search. The prompt instructs it to prefer
+      approved sources (NCSU Plant Toolbox, Prairie Moon Nursery, USDA Plants, FSUS, Missouri Botanical Garden)
+      and fall back to botanical training knowledge when those sources don't have the plant.
+    </p>
+    <p style="margin:0;">
+      <strong>Cost:</strong> ~$0.03 per plant (~$6 for a full 200-plant sale).
+      For future years when you're only adding a handful of new plants, expect a few cents total.
+      Use the <em>Enrich 1</em> or <em>Enrich 10</em> buttons to test before running the full batch.
+    </p>
+    <p style="margin:0;">
+      <strong>Saving your work:</strong> After enriching, click <em>Download enriched plants.csv</em> in Step 2.
+      Drop that file back into Step 1 next time and all previously enriched plants will load instantly —
+      no API calls needed for plants already in the CSV.
+    </p>
+    <p style="margin:0;">
+      <strong>The API key is optional</strong> — skip this section and fill in data manually in the review table,
+      or use <em>Copy prompt</em> on any row to run the prompt yourself in ChatGPT or Claude and paste the result back with <em>Fill from clipboard</em>.
+    </p>
+  </div>
   <div style="background:#fde8e8; border:2px solid #c0392b; border-radius:6px; padding:12px 16px; margin-bottom:14px;">
     <strong style="color:#7b1c1c;">⚠ Security warning:</strong>
     <span style="color:#7b1c1c; font-family:Calibri,sans-serif; font-size:0.88em;">
@@ -119,8 +218,9 @@
     Plants marked <strong>Needs enrichment</strong> are missing data. Three ways to fill them in:
   </p>
   <ol style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 16px; padding-left:1.4em; line-height:1.7;">
-    <li><strong>Auto-enrich</strong> — enter an OpenAI API key in Step 1.5 above and click Enrich. Runs automatically for all pending plants.</li>
-    <li><strong>Copy prompt + AI</strong> — click <em>Copy prompt</em> on any row, paste into ChatGPT or Claude, copy the JSON output, then click <em>Fill from clipboard</em> to apply the response.</li>
+    <li><strong>Bulk auto-enrich</strong> — enter an OpenAI API key in Step 1.5 and click one of the Enrich buttons to run all (or a batch) of pending plants automatically.</li>
+    <li><strong>Per-row auto-enrich</strong> — once an API key is entered, an <em>Auto-enrich</em> button appears on every row. Use this to re-enrich a single plant or fix a bad result without re-running the whole batch.</li>
+    <li><strong>Copy prompt + AI</strong> — click <em>Copy prompt</em> on any row, paste into ChatGPT or Claude, copy the JSON output, then click <em>Fill from clipboard</em> to apply it. Works without an API key.</li>
     <li><strong>Manual edit</strong> — type directly into the Latin name, Attributes, Highlight, and icon fields. The row will be marked Manually Enriched.</li>
   </ol>
   <div class="table-scroll">

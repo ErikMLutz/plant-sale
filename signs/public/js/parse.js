@@ -174,7 +174,7 @@ function parseSquarespaceRows(rows, csvMap) {
       attributes_line:  match ? match.attributes_line : '',
       highlight_line:   match ? match.highlight_line  : '',
       sun_level:        match ? match.sun_level        : '',
-      moisture:         match ? match.moisture         : 'average',
+      moisture:         match ? match.moisture         : '',
       is_pollinator:    match ? match.is_pollinator    : false,
       is_deer_resistant: match ? match.is_deer_resistant : false,
       source: match ? (match.source || 'csv') : 'pending',

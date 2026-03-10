@@ -4,12 +4,50 @@
 // and extract structured data from NCSU, Prairie Moon, USDA, FSUS, and MBG.
 
 /**
+ * Fix soft-wrapped JSON (e.g. from terminal output or copy-paste).
+ * Outside strings: newline+whitespace → nothing  (so "t\n  rue" → "true")
+ * Inside strings:  newline+whitespace → one space (so "Tie\n  Dye" → "Tie Dye")
+ */
+function unwrapJson(text) {
+  let result = '';
+  let inString = false;
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '\\' && inString) {
+      result += ch + text[i + 1];
+      i += 2;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      result += ch;
+      i++;
+      continue;
+    }
+    if (ch === '\n') {
+      // Skip the newline and any following horizontal whitespace
+      let j = i + 1;
+      while (j < text.length && (text[j] === ' ' || text[j] === '\t')) j++;
+      if (inString) result += ' '; // preserve word boundary inside strings
+      i = j;
+      continue;
+    }
+    result += ch;
+    i++;
+  }
+  return result;
+}
+
+/**
  * Build the prompt for gpt-4o-search-preview.
  * Instructs the model to web search within approved domains only.
  * The model finds the correct pages itself rather than relying on guessed URL slugs.
  */
 function buildPrompt(plant) {
   const lines = [
+    'You are a botanist filling in plant sale sign data. Search the web and return only valid JSON with no markdown or code fences.',
+    '',
     `Plant common name: ${plant.common}`,
     `Squarespace description: ${plant.description || '(none)'}`,
     `Tags: ${plant.tags || '(none)'}`,
@@ -58,28 +96,35 @@ function buildPrompt(plant) {
   return lines.join('\n');
 }
 
+const APPROVED_DOMAINS = [
+  'plants.ces.ncsu.edu',
+  'fsus.ncbg.unc.edu',
+  'plants.usda.gov',
+  'prairiemoon.com',
+  'missouribotanicalgarden.org',
+];
+
 /**
- * Call gpt-4o-search-preview (web search enabled) and return parsed JSON.
- * Falls back to parsing JSON from response text since search models don't
- * support response_format: json_object.
+ * Call the OpenAI Responses API with web_search_preview + allowed_domains filter.
+ * This forces real web search restricted to approved plant data sources.
  */
 async function callOpenAI(plant, apiKey) {
-  const userMsg = buildPrompt(plant);
+  const prompt = buildPrompt(plant);
 
-  const systemMsg = 'You are a botanist filling in plant sale sign data. Browse the provided URLs to find accurate data. Return only valid JSON with no markdown formatting or code fences.';
+  console.groupCollapsed(`[enrich] ▶ ${plant.common} — sending prompt`);
+  console.log('prompt:', prompt);
+  console.groupEnd();
 
-  const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+  const resp = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4o-search-preview',
-      messages: [
-        { role: 'system', content: systemMsg },
-        { role: 'user',   content: userMsg   },
-      ],
+      model: 'gpt-4o',
+      input: prompt,
+      tools: [{ type: 'web_search_preview' }],
     }),
   });
 
@@ -89,14 +134,33 @@ async function callOpenAI(plant, apiKey) {
   }
 
   const data = await resp.json();
-  const content = data.choices?.[0]?.message?.content;
+
+  // Log full response — output array shows web_search_call steps + final message
+  console.groupCollapsed(`[enrich] ▶ ${plant.common} — raw response`);
+  console.log('usage:', data.usage);
+  if (data.output?.length) {
+    data.output.forEach((item, i) => {
+      if (item.type === 'web_search_call') {
+        console.log(`output[${i}] web_search_call:`, item);
+      } else if (item.type === 'message') {
+        console.log(`output[${i}] message:`, item.content);
+      } else {
+        console.log(`output[${i}]:`, item);
+      }
+    });
+  }
+  console.groupEnd();
+
+  // output_text is the concatenated text from all message output items
+  const content = data.output_text;
   if (!content) throw new Error('Empty response from OpenAI');
 
-  // gpt-4o-search-preview returns text; extract JSON from it
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('No JSON found in response');
 
-  return JSON.parse(jsonMatch[0]);
+  const parsed = JSON.parse(unwrapJson(jsonMatch[0]));
+  console.log(`[enrich] ✓ ${plant.common} — parsed fields:`, parsed);
+  return parsed;
 }
 
 /**

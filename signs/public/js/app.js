@@ -3,6 +3,11 @@ let plants = [];
 
 // ─── API key helpers ──────────────────────────────────────────────────────────
 
+function syncRowEnrichBtns() {
+  const key = document.getElementById('openai-key')?.value.trim() || '';
+  document.querySelectorAll('.row-enrich-btn').forEach(b => { b.disabled = !key; });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const saved = localStorage.getItem('openai_api_key');
   if (saved) {
@@ -10,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el) {
       el.value = saved;
       document.getElementById('key-status').textContent = '✓ Saved';
+      syncRowEnrichBtns();
     }
   }
 });
@@ -18,6 +24,7 @@ function saveApiKey() {
   const key = document.getElementById('openai-key').value.trim();
   localStorage.setItem('openai_api_key', key);
   document.getElementById('key-status').textContent = '✓ Saved';
+  syncRowEnrichBtns();
 }
 
 // ─── File input handlers ──────────────────────────────────────────────────────
@@ -66,7 +73,21 @@ function runImport() {
       return;
     }
 
-    plants = parseSquarespaceRows(rows, csvMap);
+    // Apply import filters before parsing (mirrors download_images.py filtering)
+    let filteredRows = rows;
+    if (appSettings.filterVisible) {
+      filteredRows = filteredRows.filter(r =>
+        (r['Visible'] || '').trim().toLowerCase() === 'yes'
+      );
+    }
+    if (appSettings.excludedPages.length > 0) {
+      const excluded = new Set(appSettings.excludedPages);
+      filteredRows = filteredRows.filter(r =>
+        !excluded.has((r['Product Page'] || '').trim().toLowerCase())
+      );
+    }
+
+    plants = parseSquarespaceRows(filteredRows, csvMap);
 
     // Apply debug plant limit
     if (DEBUG && debugState.limitEnabled && plants.length > debugState.limitValue) {
@@ -184,64 +205,85 @@ function renderPage() {
     applyBadge(badge, plant.source);
     tdSource.appendChild(badge);
 
-    if (plant.source === 'pending') {
-      const copyBtn = document.createElement('button');
-      copyBtn.className   = 'secondary copy-prompt-btn';
-      copyBtn.textContent = 'Copy prompt';
-      copyBtn.addEventListener('click', async () => {
-        const prompt = buildPrompt(plant);
-        try {
-          await navigator.clipboard.writeText(prompt);
-          copyBtn.textContent = 'Copied!';
-        } catch (e) {
-          copyBtn.textContent = 'Failed';
-        }
-        setTimeout(() => { copyBtn.textContent = 'Copy prompt'; }, 2000);
-      });
-      tdSource.appendChild(copyBtn);
+    const rowEnrichBtn = document.createElement('button');
+    rowEnrichBtn.className   = 'secondary row-enrich-btn';
+    rowEnrichBtn.textContent = 'Auto-enrich';
+    rowEnrichBtn.disabled    = !(document.getElementById('openai-key')?.value.trim());
+    rowEnrichBtn.addEventListener('click', async () => {
+      const apiKey = document.getElementById('openai-key').value.trim();
+      if (!apiKey) return;
+      rowEnrichBtn.disabled = true;
+      rowEnrichBtn.textContent = 'Enriching…';
+      const updated = await enrichPlant(plant, apiKey);
+      plants[idx] = updated;
+      if (!updated.enrichError) {
+        applyEnrichedDataToRow(tr, badge, updated);
+        const pendingCount = plants.filter(p => p.source === 'pending').length;
+        document.getElementById('enrich-btn-all').textContent = `Enrich all (${pendingCount}) pending plants`;
+      }
+      rowEnrichBtn.textContent = updated.enrichError ? 'Failed' : 'Done';
+      setTimeout(() => {
+        rowEnrichBtn.textContent = 'Auto-enrich';
+        rowEnrichBtn.disabled = !(document.getElementById('openai-key')?.value.trim());
+      }, 2000);
+    });
+    tdSource.appendChild(rowEnrichBtn);
 
-      const fillBtn = document.createElement('button');
-      fillBtn.className   = 'secondary copy-prompt-btn';
-      fillBtn.textContent = 'Fill from clipboard';
-      fillBtn.addEventListener('click', async () => {
-        let text;
-        try {
-          text = await navigator.clipboard.readText();
-        } catch (e) {
-          fillBtn.textContent = 'No access';
-          setTimeout(() => { fillBtn.textContent = 'Fill from clipboard'; }, 2000);
-          return;
-        }
+    const copyBtn = document.createElement('button');
+    copyBtn.className   = 'secondary copy-prompt-btn';
+    copyBtn.textContent = 'Copy prompt';
+    copyBtn.addEventListener('click', async () => {
+      const prompt = buildPrompt(plant);
+      try {
+        await navigator.clipboard.writeText(prompt);
+        copyBtn.textContent = 'Copied!';
+      } catch (e) {
+        copyBtn.textContent = 'Failed';
+      }
+      setTimeout(() => { copyBtn.textContent = 'Copy prompt'; }, 2000);
+    });
+    tdSource.appendChild(copyBtn);
 
-        text = text.trim()
+    const fillBtn = document.createElement('button');
+    fillBtn.className   = 'secondary copy-prompt-btn';
+    fillBtn.textContent = 'Fill from clipboard';
+    fillBtn.addEventListener('click', async () => {
+      let text;
+      try {
+        text = await navigator.clipboard.readText();
+      } catch (e) {
+        fillBtn.textContent = 'No access';
+        setTimeout(() => { fillBtn.textContent = 'Fill from clipboard'; }, 2000);
+        return;
+      }
+
+      text = unwrapJson(
+        text.trim()
           .replace(/^```(?:json)?\s*/i, '')
           .replace(/\s*```\s*$/, '')
           .trim()
-          .replace(/\n\s+/g, ' ');
+      );
 
-        let data;
-        try { data = JSON.parse(text); }
-        catch (e) {
-          fillBtn.textContent = 'Invalid JSON';
-          setTimeout(() => { fillBtn.textContent = 'Fill from clipboard'; }, 2000);
-          return;
-        }
+      let data;
+      try { data = JSON.parse(text); }
+      catch (e) {
+        fillBtn.textContent = 'Invalid JSON';
+        setTimeout(() => { fillBtn.textContent = 'Fill from clipboard'; }, 2000);
+        return;
+      }
 
-        if (data.latin)           { plants[idx].latin           = data.latin;           latinInput.value     = data.latin; }
-        if (data.attributes_line) { plants[idx].attributes_line = data.attributes_line; attribArea.value     = data.attributes_line; }
-        if (data.highlight_line)  { plants[idx].highlight_line  = data.highlight_line;  highlightArea.value  = data.highlight_line; }
-        if (data.sun_level)       { plants[idx].sun_level       = data.sun_level;       sunSelect.value      = data.sun_level; }
-        if (data.moisture)        { plants[idx].moisture        = data.moisture;        moistureSelect.value = data.moisture; }
-        if (typeof data.is_pollinator     === 'boolean') { plants[idx].is_pollinator     = data.is_pollinator;     pollinatorCheck.checked = data.is_pollinator; }
-        if (typeof data.is_deer_resistant === 'boolean') { plants[idx].is_deer_resistant = data.is_deer_resistant; deerCheck.checked       = data.is_deer_resistant; }
+      if (data.latin)           { plants[idx].latin           = data.latin;           latinInput.value     = data.latin; }
+      if (data.attributes_line) { plants[idx].attributes_line = data.attributes_line; attribArea.value     = data.attributes_line; }
+      if (data.highlight_line)  { plants[idx].highlight_line  = data.highlight_line;  highlightArea.value  = data.highlight_line; }
+      if (data.sun_level)       { plants[idx].sun_level       = data.sun_level;       sunSelect.value      = data.sun_level; }
+      if (data.moisture)        { plants[idx].moisture        = data.moisture;        moistureSelect.value = data.moisture; }
+      if (typeof data.is_pollinator     === 'boolean') { plants[idx].is_pollinator     = data.is_pollinator;     pollinatorCheck.checked = data.is_pollinator; }
+      if (typeof data.is_deer_resistant === 'boolean') { plants[idx].is_deer_resistant = data.is_deer_resistant; deerCheck.checked       = data.is_deer_resistant; }
 
-        plants[idx].source = 'ai_enriched';
-        applyBadge(badge, 'ai_enriched');
-        copyBtn.remove();
-        fillBtn.remove();
-      });
-      tdSource.appendChild(fillBtn);
-    }
+      plants[idx].source = 'ai_enriched';
+      applyBadge(badge, 'ai_enriched');
+    });
+    tdSource.appendChild(fillBtn);
 
     tr.appendChild(tdSource);
 
@@ -410,6 +452,23 @@ function downloadEnrichedCsv() {
   URL.revokeObjectURL(a.href);
 }
 
+// ─── Shared row-update helper (used by bulk and per-row enrichment) ───────────
+
+function applyEnrichedDataToRow(tr, badge, updatedPlant) {
+  if (badge) applyBadge(badge, 'ai_enriched');
+  const inputs    = tr.querySelectorAll('input[type="text"]');
+  const textareas = tr.querySelectorAll('textarea');
+  const selects   = tr.querySelectorAll('.icon-fields select');
+  const checks    = tr.querySelectorAll('.icon-fields input[type="checkbox"]');
+  if (inputs[0])    inputs[0].value    = updatedPlant.latin           || '';
+  if (textareas[0]) textareas[0].value = updatedPlant.attributes_line || '';
+  if (textareas[1]) textareas[1].value = updatedPlant.highlight_line  || '';
+  if (selects[0])   selects[0].value   = updatedPlant.sun_level       || '';
+  if (selects[1])   selects[1].value   = updatedPlant.moisture        || '';
+  if (checks[0])    checks[0].checked  = !!updatedPlant.is_pollinator;
+  if (checks[1])    checks[1].checked  = !!updatedPlant.is_deer_resistant;
+}
+
 // ─── Enrichment UI ────────────────────────────────────────────────────────────
 
 async function startEnrichment(limit) {
@@ -447,19 +506,7 @@ async function startEnrichment(limit) {
     if (!tr) return;
 
     const badge = tr.querySelector('.badge');
-    if (badge) applyBadge(badge, 'ai_enriched');
-    tr.querySelectorAll('.copy-prompt-btn').forEach(b => b.remove());
-    const inputs    = tr.querySelectorAll('input[type="text"]');
-    const textareas = tr.querySelectorAll('textarea');
-    const selects   = tr.querySelectorAll('.icon-fields select');
-    const checks    = tr.querySelectorAll('.icon-fields input[type="checkbox"]');
-    if (inputs[0])    inputs[0].value    = updatedPlant.latin           || '';
-    if (textareas[0]) textareas[0].value = updatedPlant.attributes_line || '';
-    if (textareas[1]) textareas[1].value = updatedPlant.highlight_line  || '';
-    if (selects[0])   selects[0].value   = updatedPlant.sun_level       || '';
-    if (selects[1])   selects[1].value   = updatedPlant.moisture        || '';
-    if (checks[0])    checks[0].checked  = !!updatedPlant.is_pollinator;
-    if (checks[1])    checks[1].checked  = !!updatedPlant.is_deer_resistant;
+    applyEnrichedDataToRow(tr, badge, updatedPlant);
   });
 
   progressWrap.style.display = 'none';

@@ -1,6 +1,6 @@
 // ─── Debug ────────────────────────────────────────────────────────────────────
 // Set to false before shipping — hides the panel and removes all limits.
-const DEBUG = true;
+let DEBUG = false;
 
 // Current debug settings (kept in sync with the panel UI)
 const debugState = { limitEnabled: true, limitValue: 15, pickOverlap: true };
@@ -11,10 +11,32 @@ function syncDebugState() {
   debugState.pickOverlap  = document.getElementById('dbg-pick-overlap').checked;
 }
 
-// Show debug panel if DEBUG is on
+function toggleDebug(on) {
+  DEBUG = on;
+  document.getElementById('debug-panel').style.display = on ? 'block' : 'none';
+}
+
+// Debug panel is always rendered in HTML; toggle controls visibility
 document.addEventListener('DOMContentLoaded', () => {
-  if (DEBUG) document.getElementById('debug-panel').style.display = 'block';
+  document.getElementById('debug-panel').style.display = 'none';
 });
+
+// ─── App settings (kept in sync with the settings panel UI) ──────────────────
+const appSettings = {
+  filterVisible: true,
+  excludedPages: ['veggies', 'herbs', 'houseplants'],
+};
+
+function syncSettings() {
+  const w = parseFloat(document.getElementById('cfg-slide-w').value);
+  const h = parseFloat(document.getElementById('cfg-slide-h').value);
+  if (w > 0) SLIDE_CONFIG.slideW = w;
+  if (h > 0) SLIDE_CONFIG.slideH = h;
+
+  appSettings.filterVisible = document.getElementById('cfg-filter-visible').checked;
+  appSettings.excludedPages = document.getElementById('cfg-excluded-pages').value
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+}
 
 // ─── Icon configuration ───────────────────────────────────────────────────────
 // Edit this object to change icon display. Keys must match sun_level / moisture
