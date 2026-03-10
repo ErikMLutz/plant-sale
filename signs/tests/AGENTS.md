@@ -59,7 +59,19 @@ For each test plant it:
 
 ## Known ground truth caveats
 
-The `plants.csv` `categories` column is inconsistently filled. For `Virginia snakeroot`, the ground truth has `is_pollinator: false` and `is_deer_resistant: false` because the category boxes were left unchecked — but NCSU clearly identifies it as deer-resistant and a larval host for pipevine swallowtail. **The AI output may be more accurate than the ground truth for these fields.**
+The `plants.csv` was hand-assembled and has several known errors. When comparing AI output to ground truth, check these before marking a field wrong:
+
+| Plant | Field | GT value | Correct value | Notes |
+|---|---|---|---|---|
+| Virginia snakeroot | `attributes_line` width | `1-15 ft` | `1-2 ft` | Typo for 1–1.5 ft; NCSU says 1–2 ft |
+| Virginia snakeroot | USDA zone | `4-8` | `5-9` | NCSU reports 5a–9b |
+| Virginia snakeroot | `is_pollinator` | `false` | `true` | NCSU explicitly lists larval host for pipevine swallowtail |
+| Virginia snakeroot | `is_deer_resistant` | `false` | `true` | NCSU explicitly lists deer resistance |
+| Anise hyssop | Native range | `North America` | `North America` | GT correct — plant is Midwest native, not NC native despite being sold here |
+| Black cohosh | `is_pollinator` | `false` | debated | NCSU notes bumblebee attraction; per tightened definition (general attraction ≠ pollinator), false is defensible |
+| Black cohosh | USDA zone | `4-8` | `3-8` or `4-8` | NCSU lists 3a–8b; GT clips to 4–8 as a conservative estimate |
+
+**General rule:** When AI output differs from GT and the AI cites source data (NCSU), the AI is likely correct. The GT categories column is the least reliable field.
 
 ## Alternative: subagent testing (no API key needed)
 
