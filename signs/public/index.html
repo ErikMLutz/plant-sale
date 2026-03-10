@@ -71,6 +71,32 @@
   <div id="import-status" style="margin-top:10px;font-size:0.85em;color:#555;min-height:1.2em;"></div>
 </div>
 
+<!-- Step 1.5: Enrich -->
+<div class="card" id="enrich-section" style="display:none;">
+  <h2>Step 1.5 — AI Enrichment</h2>
+  <p style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px;">
+    Fills in Latin name, attributes, and highlight text for plants not in the legacy dataset.
+    Uses OpenAI gpt-4o-mini with data from USDA Plants where available.
+  </p>
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap;">
+    <label style="font-size:0.88em; font-family:Calibri,sans-serif; color:#555;">
+      OpenAI API key:
+    </label>
+    <input type="password" id="openai-key" placeholder="sk-..."
+      style="flex:1; min-width:200px; max-width:380px; padding:5px 8px; font-size:0.88em; font-family:Calibri,sans-serif; border:1px solid #ccc; border-radius:4px;" />
+    <button class="secondary" onclick="saveApiKey()">Save key</button>
+    <span id="key-status" style="font-size:0.8em; font-family:Calibri,sans-serif; color:#888;"></span>
+  </div>
+  <button id="enrich-btn" onclick="startEnrichment()">Enrich pending plants</button>
+  <div id="enrich-progress-wrap" style="display:none; margin-top:12px;">
+    <div id="enrich-progress-label" style="font-size:0.82em; color:#555; font-family:Calibri,sans-serif; margin-bottom:4px;"></div>
+    <div style="background:#e0e0d8; border-radius:4px; height:10px; overflow:hidden;">
+      <div id="enrich-progress-bar" style="height:100%; width:0%; background:#2d5a27; transition:width 0.2s ease;"></div>
+    </div>
+  </div>
+  <div id="enrich-status" style="margin-top:10px; font-size:0.85em; min-height:1.2em;"></div>
+</div>
+
 <!-- Step 2: Review + Generate -->
 <div class="card" id="review-section">
   <h2>Step 2 — Review &amp; Edit</h2>
@@ -106,6 +132,7 @@
 <script src="js/parse.js"></script>
 <script src="js/images.js"></script>
 <script src="js/pptx.js"></script>
+<script src="js/enrich.js"></script>
 <script src="js/app.js"></script>
 
 </body>

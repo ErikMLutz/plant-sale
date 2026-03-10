@@ -150,3 +150,4 @@ table textarea:focus { outline: 1px solid #2d5a27; background: #fff; }
 
 /* ── Generate row ── */
 .gen-row { display: flex; align-items: center; gap: 16px; margin-top: 14px; }
+.badge-error { background: #fde8e8; color: #7b1c1c; }

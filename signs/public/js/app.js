@@ -1,6 +1,25 @@
 // ─── App state ────────────────────────────────────────────────────────────────
 let plants = [];
 
+// ─── API key helpers ──────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  const saved = localStorage.getItem('openai_api_key');
+  if (saved) {
+    const el = document.getElementById('openai-key');
+    if (el) {
+      el.value = saved;
+      document.getElementById('key-status').textContent = '✓ Saved';
+    }
+  }
+});
+
+function saveApiKey() {
+  const key = document.getElementById('openai-key').value.trim();
+  localStorage.setItem('openai_api_key', key);
+  document.getElementById('key-status').textContent = '✓ Saved';
+}
+
 // ─── File input handlers ──────────────────────────────────────────────────────
 
 function handleSsFile(input) {
@@ -77,6 +96,19 @@ function runImport() {
         : 'No legacy file provided — all plants need enrichment.');
 
     buildReviewTable();
+
+    const pendingCount = plants.filter(p => p.source === 'pending').length;
+    const enrichSection = document.getElementById('enrich-section');
+    if (pendingCount > 0) {
+      enrichSection.style.display = 'block';
+      document.getElementById('enrich-btn').textContent = `Enrich ${pendingCount} pending plants`;
+      document.getElementById('enrich-status').textContent = '';
+      document.getElementById('enrich-progress-wrap').style.display = 'none';
+      document.getElementById('enrich-progress-bar').style.width = '0%';
+    } else {
+      enrichSection.style.display = 'none';
+    }
+
     document.getElementById('review-section').style.display = 'block';
     document.getElementById('review-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (err) {
@@ -98,8 +130,11 @@ function buildReviewTable() {
     return a.source === 'pending' ? -1 : 1;
   });
 
-  sorted.forEach((plant, idx) => {
+  sorted.forEach((plant, sortedIdx) => {
+    // Find the real index in the `plants` array so in-place updates work correctly
+    const idx = plants.indexOf(plant);
     const tr = document.createElement('tr');
+    tr.dataset.idx = idx;
 
     // Source badge
     const tdSource = document.createElement('td');
@@ -172,4 +207,62 @@ function noPhotoSpan() {
   span.className   = 'no-photo';
   span.textContent = 'No photo';
   return span;
+}
+
+// ─── Enrichment UI ────────────────────────────────────────────────────────────
+
+async function startEnrichment() {
+  const apiKey = document.getElementById('openai-key').value.trim();
+  if (!apiKey) {
+    const s = document.getElementById('enrich-status');
+    s.style.color = '#c0392b';
+    s.textContent = 'Please enter an OpenAI API key first.';
+    return;
+  }
+
+  const btn          = document.getElementById('enrich-btn');
+  const statusEl     = document.getElementById('enrich-status');
+  const progressWrap = document.getElementById('enrich-progress-wrap');
+  const progressBar  = document.getElementById('enrich-progress-bar');
+  const progressLabel= document.getElementById('enrich-progress-label');
+
+  btn.disabled = true;
+  statusEl.textContent = '';
+  progressWrap.style.display = 'block';
+  progressBar.style.width = '0%';
+
+  let errors = 0;
+
+  await enrichAllPending(apiKey, (completed, total, updatedPlant) => {
+    // Update progress bar
+    const pct = Math.round((completed / total) * 100);
+    progressBar.style.width = pct + '%';
+    progressLabel.textContent = `Enriching… ${completed} / ${total}`;
+
+    if (updatedPlant.enrichError) { errors++; return; }
+
+    // Update the row in the review table in-place
+    const tr = document.querySelector(`tr[data-idx="${plants.indexOf(updatedPlant)}"]`);
+    if (!tr) return;
+
+    const badge = tr.querySelector('.badge');
+    if (badge) {
+      badge.className   = 'badge badge-legacy';
+      badge.textContent = '🟢 Enriched';
+    }
+    const inputs    = tr.querySelectorAll('input[type="text"]');
+    const textareas = tr.querySelectorAll('textarea');
+    if (inputs[0])    inputs[0].value    = updatedPlant.latin           || '';
+    if (textareas[0]) textareas[0].value = updatedPlant.attributes_line || '';
+    if (textareas[1]) textareas[1].value = updatedPlant.highlight_line  || '';
+  });
+
+  progressWrap.style.display = 'none';
+  const enriched = plants.filter(p => p.source === 'pending' && !p.enrichError).length
+                 + plants.filter(p => p.source === 'legacy').length;
+  statusEl.style.color = errors ? '#c0392b' : '#2d5a27';
+  statusEl.textContent = errors
+    ? `Done — ${errors} plant(s) failed to enrich. Check console for details.`
+    : `✓ All pending plants enriched successfully.`;
+  btn.disabled = false;
 }
