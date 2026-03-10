@@ -57,19 +57,27 @@ For each test plant it:
 
 ## Known ground truth caveats
 
-The `plants.csv` was hand-assembled and has several known errors. When comparing AI output to ground truth, check these before marking a field wrong:
+`plants.csv` was hand-assembled and has several known errors. When comparing AI output to GT, check these first:
 
 | Plant | Field | GT value | Correct value | Notes |
 |---|---|---|---|---|
-| Virginia snakeroot | `attributes_line` width | `1-15 ft` | `1-2 ft` | Typo for 1–1.5 ft; NCSU says 1–2 ft |
+| Virginia snakeroot | width | `1-15 ft` | `1-2 ft` | Typo for 1–1.5 ft; NCSU says 1–2 ft |
 | Virginia snakeroot | USDA zone | `4-8` | `5-9` | NCSU reports 5a–9b |
-| Virginia snakeroot | `is_pollinator` | `false` | `true` | NCSU explicitly lists larval host for pipevine swallowtail |
+| Virginia snakeroot | `is_pollinator` | `false` | `true` | NCSU lists larval host for pipevine swallowtail |
 | Virginia snakeroot | `is_deer_resistant` | `false` | `true` | NCSU explicitly lists deer resistance |
-| Anise hyssop | Native range | `North America` | `North America` | GT correct — plant is Midwest native, not NC native despite being sold here |
-| Black cohosh | `is_pollinator` | `false` | debated | NCSU notes bumblebee attraction; per tightened definition (general attraction ≠ pollinator), false is defensible |
-| Black cohosh | USDA zone | `4-8` | `3-8` or `4-8` | NCSU lists 3a–8b; GT clips to 4–8 as a conservative estimate |
+| Piedmont Barbara's Buttons | width | `12-18 ft` | `12-18 in` | Unit typo; plant is 1-2 ft tall |
+| Piedmont Barbara's Buttons | highlight color | `White` | pink/lavender | GT says "White, daisy-like" — plant is actually pink/lavender |
+| Piedmont Barbara's Buttons | Deer Resistance | `moderate` | `no` | No source confirms deer resistance; attributes and boolean contradict |
+| Hollow Joe-Pye Weed | `moisture` | `average` | `wet` | Source says "consistently moist/moist to wet" — clearly wet |
+| Hollow Joe-Pye Weed | `is_pollinator` | `false` | `true` | NCSU: "major nectar source for monarchs, swallowtails, native bees" |
+| Hollow Joe-Pye Weed | `is_deer_resistant` | `false` | `false` | Correct — "moderate" resistance maps to false per rule |
+| Lady Banks' rose | Native range | `North America` | `Asia` | Rosa banksiae is native to China; NCSU confirms |
+| Lady Banks' rose | `is_deer_resistant` | `false` | `true` | GT attributes_line says "yes" — boolean contradicts text |
+| Black cohosh | `is_pollinator` | `false` | `false` | Correct — "attracts bees" is general; not a primary source |
+| Black cohosh | USDA zone | `4-8` | debated | NCSU 3a–8b; GT conservatively clips to 4–8 |
+| Various | `sun_level` | (blank) | inferred | GT often left blank; AI should infer from NCSU source |
 
-**General rule:** When AI output differs from GT and the AI cites source data (NCSU), the AI is likely correct. The GT categories column is the least reliable field.
+**General rule:** When AI output cites NCSU data and differs from GT, the AI is likely correct. `categories` column and boolean fields (`is_pollinator`, `is_deer_resistant`) are the least reliable GT fields.
 
 ## Alternative: subagent testing (no API key needed)
 
@@ -80,15 +88,24 @@ If the Anthropic API key is unavailable, spawn a subagent with the exact system 
 
 Use the output of `build_prompt()` (printed by the test script) as the prompt to pass to the subagent.
 
-## Current known issues / prompt status
+## Current prompt status (after round 2 tuning, March 2026)
 
-After round 1 of tuning (March 2026):
-- ✅ Latin name: no taxonomic authority appended
-- ✅ Bloom color: plain English enforced
-- ✅ Bloom season: early/late prefix rule added
-- ✅ Highlight structure: sensory first, wildlife second
-- ✅ is_pollinator / is_deer_resistant: explicit JSON boolean rule
-- ⚠️ USDA API: POST works but returns empty results for most plants — NCSU is the main working source
-- ⚠️ Prairie Moon / FSUS / MBG: all return 404 or are down — no data from these currently
-- ⚠️ NCSU raw HTML: browser DOM stripping removes nav better than Python regex; the 1000-char window may cut off useful content
-- ⚠️ USDA zone: NCSU reports zone 5–9 for some plants, ground truth expects 4–8 — prefer wider range when sources conflict
+### ✅ Fixed
+- Latin name: no taxonomic authority
+- Bloom color: plain English list now includes `lavender`; Bloom = color + season ONLY (no form descriptors)
+- Bloom color multi: "/" separator for two colors (e.g. "white/yellow")
+- Bloom season: early/mid/late prefix; multi-season anchoring
+- Size: full range (1-3 ft), not max-only
+- Soil: texture/drainage + tolerance; 6-word cap
+- Native range: botanically NC native only; "USA" not valid
+- moisture: "occasionally dry" → `average`; "consistently moist" → `wet`
+- is_pollinator: now explicitly includes butterflies; vague "attracts" language = false
+- is_deer_resistant: "moderate" Deer Resistance → false (now explicit)
+- sun_level: "full sun only → full_sun" case added
+- Highlight: sensory → wildlife/cultural/landscape; may use botanical knowledge
+
+### ⚠️ Still limited by data sources
+- USDA API: POST endpoint works but returns empty for most plants — NCSU is the primary working source
+- Prairie Moon / FSUS / MBG: 404 or down — no data currently
+- NCSU HTML: Python regex stripping leaves nav artifacts; browser version strips better via DOM
+- GT has many blank sun_level fields — AI infers from source, which is correct behavior
