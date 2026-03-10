@@ -1,188 +1,72 @@
 // ─── AI Enrichment ────────────────────────────────────────────────────────────
-// Attempts to scrape all approved sources (USDA, NCSU, Prairie Moon, FSUS, MBG)
-// then passes whatever was gathered to OpenAI gpt-4o-mini for structured extraction.
-// Each source fetch is wrapped in try/catch — CORS failures are logged and skipped.
-
-const APPROVED_SOURCES = [
-  'NCSU Plant Toolbox (plants.ces.ncsu.edu)',
-  'USDA PLANTS Database (plants.usda.gov)',
-  'Prairie Moon Nursery (prairiemoon.com)',
-  'FSUS / Flora of the Southeastern US (fsus.ncbg.unc.edu)',
-  'Missouri Botanical Garden (missouribotanicalgarden.org)',
-];
+// Builds direct source URLs for each plant, injects them into the prompt,
+// and calls gpt-4o-search-preview (which has built-in web search) to fetch
+// and extract structured data from NCSU, Prairie Moon, USDA, FSUS, and MBG.
 
 /**
- * Derive a URL slug from a latin or common name.
- * e.g. "Actaea racemosa" → "actaea-racemosa"
+ * Build the prompt for gpt-4o-search-preview.
+ * Instructs the model to web search within approved domains only.
+ * The model finds the correct pages itself rather than relying on guessed URL slugs.
  */
-function toSlug(name) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-}
-
-/**
- * Try to fetch a URL and return stripped plain text (first ~800 chars of body text).
- * Logs all failures to console so CORS issues are visible during debugging.
- * Returns '' on any error.
- */
-async function tryFetchText(label, url) {
-  try {
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const html = await resp.text();
-    // Strip tags and collapse whitespace; take first 800 chars of useful content
-    const div = document.createElement('div');
-    div.innerHTML = html;
-    // Remove boilerplate elements before extracting text
-    div.querySelectorAll('script,style,nav,header,footer,button,a[href],noscript').forEach(el => el.remove());
-    const text = (div.textContent || '')
-      .replace(/[<>]/g, ' ')         // remove stray angle brackets
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 1000);
-    if (text) console.log(`[enrich] ✓ ${label}: fetched ${text.length} chars`);
-    return text ? `[${label}]\n${text}` : '';
-  } catch (err) {
-    // Always log so CORS failures are visible in DevTools
-    console.warn(`[enrich] ✗ ${label} (${url}): ${err.message}`);
-    return '';
-  }
-}
-
-/**
- * Attempt to fetch plant data from the USDA Plants Service JSON API.
- * Returns structured key/value context string, or '' on failure.
- */
-async function fetchUsdaJson(commonName, latinName) {
-  const query = latinName || commonName;
-  try {
-    // API requires POST with JSON body; GET returns 405
-    const resp = await fetch('https://plantsservices.sc.egov.usda.gov/api/PlantSearch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ Text: query }),
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    const results = data.PlantResults || data.Results || (Array.isArray(data) ? data : []);
-    // Filter out empty placeholder results (API returns 1 empty result when nothing found)
-    const valid = results.filter(r => r.Symbol);
-    if (!valid.length) return '';
-    const p = valid[0];
-    const parts = [];
-    // Array fields
-    if (p.Durations?.length)    parts.push(`Duration: ${p.Durations.join(', ')}`);
-    if (p.GrowthHabits?.length) parts.push(`Growth habit: ${p.GrowthHabits.join(', ')}`);
-    if (p.NativeStatuses?.length) parts.push(`Native status: ${p.NativeStatuses.map(s => s.Status || s).join(', ')}`);
-    // Scalar fields from Characteristics sub-object
-    const ch = p.Characteristics || {};
-    if (ch.ShadeTolerance)   parts.push(`Shade tolerance: ${ch.ShadeTolerance}`);
-    if (ch.MoistureUse)      parts.push(`Moisture use: ${ch.MoistureUse}`);
-    if (ch.DroughtTolerance) parts.push(`Drought tolerance: ${ch.DroughtTolerance}`);
-    if (!parts.length) return '';
-    console.log(`[enrich] ✓ USDA JSON API: ${parts.length} fields`);
-    return `[USDA Plants API]\n${parts.join('; ')}`;
-  } catch (err) {
-    console.warn(`[enrich] ✗ USDA JSON API: ${err.message}`);
-    return '';
-  }
-}
-
-/**
- * Try all approved sources for a plant and return combined context string.
- * All fetches run in parallel; failures are logged and skipped.
- */
-async function fetchAllSources(plant) {
-  const latin  = plant.latin  || '';
-  const common = plant.common || '';
-  const latinSlug  = toSlug(latin);
-  const commonSlug = toSlug(common);
-
-  const attempts = [
-    // USDA structured JSON API (best data quality when it works)
-    fetchUsdaJson(common, latin),
-
-    // NCSU Plant Toolbox — try latin slug, then common slug
-    tryFetchText('NCSU Plant Toolbox', `https://plants.ces.ncsu.edu/plants/${latinSlug}/`),
-    tryFetchText('NCSU Plant Toolbox (common)', `https://plants.ces.ncsu.edu/plants/${commonSlug}/`),
-
-    // Prairie Moon Nursery — try both latin and common slug patterns
-    tryFetchText('Prairie Moon', `https://www.prairiemoon.com/${latinSlug}.html`),
-    tryFetchText('Prairie Moon', `https://www.prairiemoon.com/${latinSlug}-${commonSlug}.html`),
-
-    // FSUS — try both slug patterns
-    tryFetchText('FSUS', `https://fsus.ncbg.unc.edu/plants/${latinSlug}`),
-    tryFetchText('FSUS', `https://fsus.ncbg.unc.edu/search?q=${encodeURIComponent(latin || common)}`),
-
-    // Missouri Botanical Garden (useful for non-natives)
-    tryFetchText('Missouri Botanical Garden',
-      `https://www.missouribotanicalgarden.org/PlantFinder/PlantFinderListPage.aspx?basic=${encodeURIComponent(latin || common)}`),
-  ];
-
-  const results = await Promise.all(attempts);
-  return results.filter(Boolean).join('\n\n');
-}
-
-/**
- * Build the compact prompt for gpt-4o-mini.
- *
- * @param {object} plant
- * @param {string} usdaContext
- * @returns {string}
- */
-function buildPrompt(plant, context) {
+function buildPrompt(plant) {
   const lines = [
     `Plant common name: ${plant.common}`,
     `Squarespace description: ${plant.description || '(none)'}`,
     `Tags: ${plant.tags || '(none)'}`,
+    '',
+    'Search the web for this plant to find its horticultural data.',
+    'Only use results from these approved domains (in priority order):',
+    '1. plants.ces.ncsu.edu  (NCSU Extension Gardener Plant Toolbox)',
+    '2. fsus.ncbg.unc.edu    (Flora of the Southeastern US)',
+    '3. plants.usda.gov      (USDA Plants Database)',
+    '4. prairiemoon.com      (Prairie Moon Nursery)',
+    '5. missouribotanicalgarden.org  (Missouri Botanical Garden)',
+    '',
+    'Do not use any other websites. If none of the approved sites have data for this plant, use your botanical training knowledge.',
+    '',
+    'Return ONLY this exact JSON object (no markdown, no code fences, no extra text):',
+    JSON.stringify({
+      latin: 'genus species [cultivar if applicable] — species name only, no taxonomic author citations',
+      attributes_line: 'Size: H ft tall x W ft wide; Bloom: color, season; Soil: type; Native range: Continent[, NC native]; USDA zone: #-#; Deer Resistance: yes/moderate/no',
+      highlight_line: 'sentence 1: distinctive sensory, structural, or garden trait. sentence 2: ecological or wildlife value.',
+      sun_level: 'full_sun OR part_shade OR shade',
+      moisture: 'wet OR average OR drought',
+      is_pollinator: true,
+      is_deer_resistant: false,
+    }, null, 2),
+    '',
+    [
+      'Rules:',
+      '- latin: genus + species only (e.g. "Actaea racemosa"). Include cultivar name in quotes if the plant is a named cultivar. Never add author citations like "(Pursh) Kuntze".',
+      '- attributes_line: each segment 6 words or fewer. Semicolons between segments, no trailing semicolon.',
+      '- Size: use the full height range × full width range from the source (e.g. "1-3 ft tall x 1-2 ft wide"). Use ft for plants over 1 ft tall/wide; use in for smaller dimensions.',
+      '- Bloom color: color + season ONLY — no form descriptors (e.g. not "clusters", "button-like"). Allowed plain English colors: white, lavender, purple, pink, red, orange, yellow, blue, green. If multiple colors, list the two most prominent separated by "/" (e.g. "white/yellow").',
+      '- Bloom season: Spring / early Summer / mid Summer / late Summer / early Fall / Fall. "mid-late Summer" is also valid.',
+      '- Soil: texture/drainage first, then notable tolerance if applicable (e.g. "moist, well-drained"). 6 words or fewer.',
+      '- Native range: "North America, NC native" only if botanically native to NC. "North America" if continental but not NC. "Asia", "Europe", etc. Never list US states.',
+      '- USDA zone: numeric range only, e.g. "4-8".',
+      '- Deer Resistance: exactly "yes", "moderate", or "no".',
+      '- highlight_line: two sentences max. First: a specific sensory, structural, or unusual trait. Second: wildlife value, ecological role, or landscape use. Name host species when known.',
+      '- sun_level: "full_sun" if full sun only; "part_shade" if full sun + part shade listed; "shade" if part shade or shade only.',
+      '- moisture: "wet" = consistently moist or wet; "drought" = drought-tolerant; "average" = typical garden moisture. When in doubt, use "average".',
+      '- is_pollinator: true only if documented larval host plant OR primary nectar/pollen source for native bees, butterflies, or hummingbirds.',
+      '- is_deer_resistant: true only if Deer Resistance = "yes". "moderate" → false.',
+      '- is_pollinator and is_deer_resistant: must be JSON booleans (true/false), not strings.',
+    ].join('\n'),
   ];
-  if (context) lines.push('\nReference data from approved sources:\n' + context);
-
-  lines.push('');
-  lines.push('Return this exact JSON shape (replace ALL placeholder text with real values):');
-  lines.push(JSON.stringify({
-    latin: 'genus species [cultivar if applicable] — species name only, no taxonomic author citations',
-    attributes_line: 'Size: H ft tall x W ft wide; Bloom: color, season; Soil: type; Native range: Continent[, NC native]; USDA zone: #-#; Deer Resistance: yes/moderate/no',
-    highlight_line: 'sentence 1: distinctive sensory, structural, or garden trait. sentence 2: ecological or wildlife value.',
-    sun_level: 'full_sun OR part_shade OR shade',
-    moisture: 'wet OR average OR drought',
-    is_pollinator: 'true or false',
-    is_deer_resistant: 'true or false',
-  }, null, 2));
-
-  lines.push('');
-  lines.push([
-    'Rules:',
-    '- latin: genus + species only (e.g. "Actaea racemosa"). Include cultivar name in quotes if the plant is a named cultivar. Never add author citations like "(Pursh) Kuntze".',
-    '- attributes_line: each segment 6 words or fewer. Semicolons between segments, no trailing semicolon.',
-    '- Size: use the full height range × full width range from the source (e.g. "1-3 ft tall x 1-2 ft wide"). Use ft for plants over 1 ft tall/wide; use in for smaller dimensions (e.g. "12-18 in wide").',
-    '- Bloom color: the Bloom segment contains color + season ONLY — no form descriptors (e.g. not "clusters", "button-like", "tubular"). Allowed plain English colors: white, lavender, purple, pink, red, orange, yellow, blue, green. If multiple colors, list the two most prominent separated by "/" (e.g. "white/yellow"). Avoid vague modifiers like "pale" or "bright".',
-    '- Bloom season: Spring / early Summer / mid Summer / late Summer / early Fall / Fall. "mid-late Summer" is also valid. Use "early", "mid", or "late" prefix when bloom spans less than half a season. When bloom spans multiple seasons, anchor to the peak or starting season — prefer "early Fall" over "late Summer" when bloom continues into fall.',
-    '- Soil: texture/drainage first, then notable tolerance if applicable (e.g. "moist, well-drained" or "well-drained, drought tolerant"). 6 words or fewer.',
-    '- Native range: "North America, NC native" only if botanically native to NC. "North America" if continental but not NC. "Asia", "Europe", etc. Never list US states. Being sold at an NC sale does not make a plant NC native.',
-    '- USDA zone: numeric range only, e.g. "4-8". Trust the reference source.',
-    '- Deer Resistance: exactly "yes", "moderate", or "no".',
-    '- highlight_line: two sentences max. First: a specific sensory, structural, or unusual trait (fragrance, bloom shape, color, texture). Second: wildlife value, ecological role, cultural/historical use, or landscape use. Name host species when known. You may use botanical knowledge beyond scraped data.',
-    '- sun_level: dominant light. Full sun + part shade listed → "part_shade". Full sun only → "full_sun". Part shade or shade only → "shade".',
-    '- moisture: "wet" = consistently moist or wet; "drought" = drought-tolerant (not just "occasionally dry"); "average" = typical garden moisture, occasionally dry, or moist-but-not-wet. When in doubt, use "average".',
-    '- is_pollinator: true only if the plant is a documented larval host plant OR a primary nectar/pollen source for native bees, butterflies, or hummingbirds. Vague "attracts insects/bees/butterflies" language without specificity = false.',
-    '- is_deer_resistant: true only if Deer Resistance = "yes". "moderate" Deer Resistance → false. false if not mentioned in source.',
-    '- is_pollinator and is_deer_resistant: must be exactly true or false (JSON booleans, not strings).',
-  ].join('\n'));
 
   return lines.join('\n');
 }
 
 /**
- * Call OpenAI gpt-4o-mini and return parsed JSON, or throw on failure.
- *
- * @param {object} plant
- * @param {string} apiKey
- * @param {string} usdaContext
- * @returns {Promise<object>}
+ * Call gpt-4o-search-preview (web search enabled) and return parsed JSON.
+ * Falls back to parsing JSON from response text since search models don't
+ * support response_format: json_object.
  */
-async function callOpenAI(plant, apiKey, usdaContext) {
-  const systemMsg = `You are a botanist filling in plant sale sign data. Use the reference data provided from approved sources (${APPROVED_SOURCES.join(', ')}) and your own botanical knowledge. Return only valid JSON, no other text.`;
-  const userMsg = buildPrompt(plant, usdaContext);
+async function callOpenAI(plant, apiKey) {
+  const userMsg = buildPrompt(plant);
+
+  const systemMsg = 'You are a botanist filling in plant sale sign data. Browse the provided URLs to find accurate data. Return only valid JSON with no markdown formatting or code fences.';
 
   const resp = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -191,9 +75,7 @@ async function callOpenAI(plant, apiKey, usdaContext) {
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
-      response_format: { type: 'json_object' },
-      temperature: 0.2,
+      model: 'gpt-4o-search-preview',
       messages: [
         { role: 'system', content: systemMsg },
         { role: 'user',   content: userMsg   },
@@ -210,30 +92,26 @@ async function callOpenAI(plant, apiKey, usdaContext) {
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error('Empty response from OpenAI');
 
-  const parsed = JSON.parse(content);
-  return parsed;
+  // gpt-4o-search-preview returns text; extract JSON from it
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('No JSON found in response');
+
+  return JSON.parse(jsonMatch[0]);
 }
 
 /**
- * Enrich a single plant using USDA + OpenAI.
+ * Enrich a single plant using gpt-4o-search-preview with direct source URLs.
  * Never overwrites non-empty existing fields.
- *
- * @param {object} plant   - plant object (not mutated; a merged copy is returned)
- * @param {string} apiKey  - OpenAI API key
- * @returns {Promise<object>} - updated plant object
  */
 async function enrichPlant(plant, apiKey) {
-  const usdaContext = await fetchAllSources(plant);
-
   let aiData;
   try {
-    aiData = await callOpenAI(plant, apiKey, usdaContext);
+    aiData = await callOpenAI(plant, apiKey);
   } catch (err) {
     console.error('[enrich] OpenAI failed for', plant.common, '—', err.message);
     return { ...plant, enrichError: true, source: 'pending' };
   }
 
-  // Merge: only fill in fields that are currently empty / falsy
   const merged = { ...plant };
 
   const stringFields = ['latin', 'attributes_line', 'highlight_line', 'sun_level', 'moisture'];
@@ -243,7 +121,6 @@ async function enrichPlant(plant, apiKey) {
     }
   }
 
-  // Boolean fields: only set if not already explicitly true
   if (!merged.is_pollinator && aiData.is_pollinator === true) {
     merged.is_pollinator = true;
   }
@@ -258,18 +135,16 @@ async function enrichPlant(plant, apiKey) {
 }
 
 /**
- * Enrich all plants with source === 'pending' in parallel (concurrency 3).
+ * Enrich up to `limit` plants with source === 'pending' (concurrency 3).
+ * Pass Infinity to enrich all pending plants.
  * Mutates the global `plants` array in place and calls onProgress after each.
- *
- * @param {string}   apiKey      - OpenAI API key
- * @param {Function} onProgress  - called as onProgress(completed, total, updatedPlant)
- * @returns {Promise<void>}
  */
-async function enrichAllPending(apiKey, onProgress) {
+async function enrichAllPending(apiKey, limit, onProgress) {
   // `plants` is a global defined in app.js
   const pending = plants
     .map((p, i) => ({ plant: p, idx: i }))
-    .filter(({ plant }) => plant.source === 'pending');
+    .filter(({ plant }) => plant.source === 'pending')
+    .slice(0, limit);
 
   const total = pending.length;
   if (total === 0) return;

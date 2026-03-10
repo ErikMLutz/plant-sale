@@ -101,7 +101,7 @@ function runImport() {
     const enrichSection = document.getElementById('enrich-section');
     if (pendingCount > 0) {
       enrichSection.style.display = 'block';
-      document.getElementById('enrich-btn').textContent = `Enrich ${pendingCount} pending plants`;
+      document.getElementById('enrich-btn-all').textContent = `Enrich all (${pendingCount}) pending plants`;
       document.getElementById('enrich-status').textContent = '';
       document.getElementById('enrich-progress-wrap').style.display = 'none';
       document.getElementById('enrich-progress-bar').style.width = '0%';
@@ -189,7 +189,7 @@ function renderPage() {
       copyBtn.className   = 'secondary copy-prompt-btn';
       copyBtn.textContent = 'Copy prompt';
       copyBtn.addEventListener('click', async () => {
-        const prompt = buildPrompt(plant, '');
+        const prompt = buildPrompt(plant);
         try {
           await navigator.clipboard.writeText(prompt);
           copyBtn.textContent = 'Copied!';
@@ -412,7 +412,7 @@ function downloadEnrichedCsv() {
 
 // ─── Enrichment UI ────────────────────────────────────────────────────────────
 
-async function startEnrichment() {
+async function startEnrichment(limit) {
   const apiKey = document.getElementById('openai-key').value.trim();
   if (!apiKey) {
     const s = document.getElementById('enrich-status');
@@ -421,20 +421,20 @@ async function startEnrichment() {
     return;
   }
 
-  const btn          = document.getElementById('enrich-btn');
+  const enrichBtns   = document.querySelectorAll('.enrich-btn');
   const statusEl     = document.getElementById('enrich-status');
   const progressWrap = document.getElementById('enrich-progress-wrap');
   const progressBar  = document.getElementById('enrich-progress-bar');
   const progressLabel= document.getElementById('enrich-progress-label');
 
-  btn.disabled = true;
+  enrichBtns.forEach(b => b.disabled = true);
   statusEl.textContent = '';
   progressWrap.style.display = 'block';
   progressBar.style.width = '0%';
 
   let errors = 0;
 
-  await enrichAllPending(apiKey, (completed, total, updatedPlant) => {
+  await enrichAllPending(apiKey, limit ?? Infinity, (completed, total, updatedPlant) => {
     // Update progress bar
     const pct = Math.round((completed / total) * 100);
     progressBar.style.width = pct + '%';
@@ -466,6 +466,10 @@ async function startEnrichment() {
   statusEl.style.color = errors ? '#c0392b' : '#2d5a27';
   statusEl.textContent = errors
     ? `Done — ${errors} plant(s) failed to enrich. Check console for details.`
-    : `✓ All pending plants enriched successfully.`;
-  btn.disabled = false;
+    : `✓ Done enriching plants.`;
+  enrichBtns.forEach(b => b.disabled = false);
+
+  // Refresh pending count on buttons
+  const pendingCount = plants.filter(p => p.source === 'pending').length;
+  document.getElementById('enrich-btn-all').textContent = `Enrich all (${pendingCount}) pending plants`;
 }

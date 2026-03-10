@@ -76,7 +76,7 @@
   <h2>Step 1.5 — AI Enrichment</h2>
   <p style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px;">
     Fills in Latin name, attributes, and highlight text for plants not in plants.csv.
-    Uses OpenAI gpt-4o-mini with data from USDA Plants where available.
+    Uses OpenAI gpt-4o-search-preview, which browses NCSU, Prairie Moon, USDA, FSUS, and MBG directly.
     <strong>The API key is optional</strong> — you can skip this section and enrich plants manually in the review table below.
   </p>
   <div style="background:#fde8e8; border:2px solid #c0392b; border-radius:6px; padding:12px 16px; margin-bottom:14px;">
@@ -95,7 +95,11 @@
     <button class="secondary" onclick="saveApiKey()">Save key</button>
     <span id="key-status" style="font-size:0.8em; font-family:Calibri,sans-serif; color:#888;"></span>
   </div>
-  <button id="enrich-btn" onclick="startEnrichment()">Enrich pending plants</button>
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:2px;">
+    <button id="enrich-btn-all" class="enrich-btn" onclick="startEnrichment()">Enrich all pending plants</button>
+    <button class="enrich-btn secondary" onclick="startEnrichment(10)">Enrich 10 pending</button>
+    <button class="enrich-btn secondary" onclick="startEnrichment(1)">Enrich 1 pending</button>
+  </div>
   <div id="enrich-progress-wrap" style="display:none; margin-top:12px;">
     <div id="enrich-progress-label" style="font-size:0.82em; color:#555; font-family:Calibri,sans-serif; margin-bottom:4px;"></div>
     <div style="background:#e0e0d8; border-radius:4px; height:10px; overflow:hidden;">
