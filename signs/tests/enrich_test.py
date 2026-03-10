@@ -2,26 +2,29 @@
 """
 Enrichment prompt test harness.
 
-Tests the AI enrichment pipeline against known ground truth from plants.csv.
-Mirrors the exact logic in public/js/enrich.js — update both in sync.
+Generates the exact system + user prompts that the production site sends to
+the AI, using real NCSU scrapes and the same buildPrompt() logic as enrich.js.
+Output is printed for a human or subagent to respond to, then evaluated.
+
+Workflow:
+    1. Run this script to generate prompts.
+    2. Paste each prompt into a subagent — ask it to respond as the AI would,
+       then compare its JSON output to the ground truth printed below each prompt.
+    3. Feed the comparison back to Claude for prompt tuning.
 
 Usage:
     python tests/enrich_test.py              # 5 random plants, seed=42
     python tests/enrich_test.py --n 10       # 10 random plants
     python tests/enrich_test.py --seed 7     # different random sample
-    python tests/enrich_test.py --n 3 --seed 99
 
-Requirements:
-    pip install anthropic
+No API key required. No external dependencies beyond the standard library.
 
 How to keep in sync with enrich.js:
-    - SYSTEM_MSG corresponds to the system message in callOpenAI()
-    - JSON_SHAPE corresponds to the shape in buildPrompt()
-    - RULES corresponds to the rules string in buildPrompt()
-    - fetch_ncsu() mirrors tryFetchText() for NCSU
-    - fetch_usda() mirrors fetchUsdaJson() — note: needs POST, not GET
-    When you change the prompt in enrich.js, update those constants here
-    and re-run to verify quality holds.
+    - SYSTEM_MSG  → system message in callOpenAI()
+    - JSON_SHAPE  → JSON shape in buildPrompt()
+    - RULES       → rules string in buildPrompt()
+    - fetch_ncsu()  mirrors tryFetchText() for NCSU
+    - fetch_usda()  mirrors fetchUsdaJson() (POST, not GET)
 """
 
 import argparse
@@ -33,8 +36,6 @@ import sys
 import urllib.request
 import urllib.parse
 from pathlib import Path
-
-import anthropic
 
 PLANTS_CSV = Path(__file__).parent.parent / "initial_info" / "email2" / "plants.csv"
 
@@ -79,8 +80,7 @@ RULES = "\n".join([
 
 # ── Source fetchers (mirror enrich.js fetchAllSources) ────────────────────────
 
-def fetch_ncsu(slug: str, max_chars: int = 1000) -> str:
-    url = f"https://plants.ces.ncsu.edu/plants/{slug}/"
+def fetch_text(label: str, url: str, max_chars: int = 1000) -> str:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=10) as r:
@@ -88,60 +88,59 @@ def fetch_ncsu(slug: str, max_chars: int = 1000) -> str:
         text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL)
         text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL)
         text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"[<>]", " ", text)
         text = re.sub(r"\s+", " ", text).strip()[:max_chars]
-        print(f"  ✓ NCSU: {len(text)} chars")
-        return f"[NCSU Plant Toolbox]\n{text}"
+        print(f"  ✓ {label}: {len(text)} chars", file=sys.stderr)
+        return f"[{label}]\n{text}"
     except Exception as e:
-        print(f"  ✗ NCSU ({url}): {e}")
+        print(f"  ✗ {label}: {e}", file=sys.stderr)
         return ""
 
 
 def fetch_usda(latin_name: str) -> str:
-    """POST to USDA PlantSearch. Returns structured context string."""
-    url = "https://plantsservices.sc.egov.usda.gov/api/PlantSearch"
     try:
         payload = json.dumps({"Text": latin_name}).encode()
         req = urllib.request.Request(
-            url, data=payload,
+            "https://plantsservices.sc.egov.usda.gov/api/PlantSearch",
+            data=payload,
             headers={"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=10) as r:
             data = json.loads(r.read())
-        results = data.get("PlantResults", [])
-        if not results or not results[0].get("Symbol"):
-            print(f"  ✗ USDA: no results for '{latin_name}'")
+        results = [r for r in (data.get("PlantResults") or []) if r.get("Symbol")]
+        if not results:
+            print(f"  ✗ USDA: no results for '{latin_name}'", file=sys.stderr)
             return ""
         p = results[0]
         parts = []
-        for key, label in [
-            ("Durations",        "Duration"),
-            ("GrowthHabits",     "Growth habit"),
-            ("NativeStatuses",   "Native status"),
-            ("ShadeTolerance",   "Shade tolerance"),
-            ("MoistureUse",      "Moisture use"),
-            ("DroughtTolerance", "Drought tolerance"),
-            ("MinimumTemperature", "Min temp (°F)"),
-        ]:
-            val = p.get(key)
-            if val:
-                parts.append(f"{label}: {val}")
+        if p.get("Durations"):    parts.append(f"Duration: {', '.join(p['Durations'])}")
+        if p.get("GrowthHabits"): parts.append(f"Growth habit: {', '.join(p['GrowthHabits'])}")
+        ch = p.get("Characteristics") or {}
+        if ch.get("ShadeTolerance"):   parts.append(f"Shade tolerance: {ch['ShadeTolerance']}")
+        if ch.get("MoistureUse"):      parts.append(f"Moisture use: {ch['MoistureUse']}")
+        if ch.get("DroughtTolerance"): parts.append(f"Drought tolerance: {ch['DroughtTolerance']}")
         if not parts:
             return ""
-        print(f"  ✓ USDA: {len(parts)} fields")
+        print(f"  ✓ USDA: {len(parts)} fields", file=sys.stderr)
         return f"[USDA Plants API]\n{'; '.join(parts)}"
     except Exception as e:
-        print(f"  ✗ USDA: {e}")
+        print(f"  ✗ USDA: {e}", file=sys.stderr)
         return ""
 
 
 def fetch_all_sources(plant: dict) -> str:
-    """Try all approved sources; return combined context string."""
-    slug = plant.get("slug", "")
-    latin = plant.get("latin_query", plant.get("common", ""))
-    parts = []
-    parts.append(fetch_usda(latin))
-    parts.append(fetch_ncsu(slug))
-    # Prairie Moon, FSUS, MBG — add here when URL formats are confirmed
+    latin  = plant.get("latin_query", "")
+    slug   = re.sub(r"[^a-z0-9]+", "-", latin.lower()).strip("-")
+    common_slug = re.sub(r"[^a-z0-9]+", "-", plant["common"].lower()).strip("-")
+
+    parts = [
+        fetch_usda(latin),
+        fetch_text("NCSU", f"https://plants.ces.ncsu.edu/plants/{slug}/"),
+        fetch_text("NCSU (common)", f"https://plants.ces.ncsu.edu/plants/{common_slug}/"),
+        fetch_text("Prairie Moon", f"https://www.prairiemoon.com/{slug}.html"),
+        fetch_text("FSUS", f"https://fsus.ncbg.unc.edu/plants/{slug}"),
+        fetch_text("MBG", f"https://www.missouribotanicalgarden.org/PlantFinder/PlantFinderListPage.aspx?basic={urllib.parse.quote(latin)}"),
+    ]
     return "\n\n".join(p for p in parts if p)
 
 
@@ -165,172 +164,80 @@ def build_prompt(plant: dict, context: str) -> str:
     return "\n".join(lines)
 
 
-# ── AI call ───────────────────────────────────────────────────────────────────
-
-def call_ai(prompt: str) -> dict:
-    client = anthropic.Anthropic()
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=700,
-        temperature=1,  # Anthropic requires temperature=1 with extended thinking; use default for regular
-        system=SYSTEM_MSG,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    raw = response.content[0].text
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", raw, re.DOTALL)
-        if m:
-            return json.loads(m.group())
-        raise ValueError(f"Could not parse JSON from response: {raw[:200]}")
-
-
-# ── Comparison ────────────────────────────────────────────────────────────────
-
-def compare(result: dict, truth: dict) -> dict:
-    scores = {}
-
-    # Exact / near-exact string fields
-    for field in ["latin", "sun_level", "moisture"]:
-        got = str(result.get(field, "")).strip().lower()
-        exp = str(truth.get(field, "")).strip().lower()
-        scores[field] = "✓" if got == exp else "✗"
-
-    # Boolean fields
-    for field in ["is_pollinator", "is_deer_resistant"]:
-        scores[field] = "✓" if result.get(field) == truth.get(field) else "✗"
-
-    # attributes_line: check each segment is present
-    attr_got = result.get("attributes_line", "").lower()
-    attr_scores = {}
-    for seg in truth.get("attributes_line", "").split(";"):
-        seg = seg.strip()
-        key = seg.split(":")[0].strip()
-        val_words = seg.split(":", 1)[1].strip().lower().split() if ":" in seg else []
-        # Check key present and at least half the value words present
-        key_found = key.lower() in attr_got
-        val_found = sum(1 for w in val_words if w in attr_got) >= max(1, len(val_words) // 2)
-        attr_scores[key] = "✓" if key_found and val_found else "✗"
-    scores["attributes"] = attr_scores
-
-    return scores
-
-
-# ── Load test plants from plants.csv ─────────────────────────────────────────
+# ── Load plants from plants.csv ───────────────────────────────────────────────
 
 def derive_sun(cats: str) -> str:
     c = cats.lower()
-    if "/sun" in c and "/part-shade" in c:   return "part_shade"
-    if "/part-shade" in c:                   return "part_shade"
-    if "/sun" in c:                          return "full_sun"
-    if "/shade" in c:                        return "shade"
+    if "/sun" in c and "/part-shade" in c: return "part_shade"
+    if "/part-shade" in c:                 return "part_shade"
+    if "/sun" in c:                        return "full_sun"
+    if "/shade" in c:                      return "shade"
     return ""
 
 def derive_moisture(cats: str) -> str:
     c = cats.lower()
-    if "/drought" in c:                             return "drought"
-    if "/rain-garden" in c or "/wet" in c:          return "wet"
+    if "/drought" in c:                              return "drought"
+    if "/rain-garden" in c or "/wet" in c:           return "wet"
     return "average"
 
-def load_test_plants(n: int, seed: int) -> list:
-    """Load n random plants from plants.csv with enough ground truth data."""
+def load_plants(n: int, seed: int) -> list:
     rows = []
     with open(PLANTS_CSV, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            latin = (row.get("latin") or "").strip()
-            common = (row.get("common") or "").strip()
-            attrs = (row.get("attributes_line") or "").strip()
+            latin     = (row.get("latin") or "").strip()
+            common    = (row.get("common") or "").strip()
+            attrs     = (row.get("attributes_line") or "").strip()
             highlight = (row.get("highlight_line") or "").strip()
             if not latin or not common or not attrs or not highlight:
                 continue
             cats = (row.get("categories") or "").strip()
-            slug = re.sub(r"[^a-z0-9]+", "-", latin.lower()).strip("-")
             rows.append({
-                "common": common,
-                "slug": slug,
-                "latin_query": latin,
-                # Simulate minimal Squarespace description from attributes/categories
-                "description": attrs[:80] if attrs else "",
-                "tags": cats.replace("/", "").replace(",", ", ").strip(", ") if cats and cats != "no info provided" else "",
+                "common":       common,
+                "latin_query":  latin,
+                "description":  attrs[:80],
+                "tags":         cats.replace("/", "").replace(",", ", ").strip(", ")
+                                if cats and cats != "no info provided" else "",
                 "truth": {
-                    "latin": latin,
-                    "attributes_line": attrs,
-                    "highlight_line": highlight,
-                    "sun_level": derive_sun(cats),
-                    "moisture": derive_moisture(cats),
-                    "is_pollinator": "/pollinator" in cats.lower(),
-                    "is_deer_resistant": "/deer" in cats.lower(),
+                    "latin":            latin,
+                    "attributes_line":  attrs,
+                    "highlight_line":   highlight,
+                    "sun_level":        derive_sun(cats),
+                    "moisture":         derive_moisture(cats),
+                    "is_pollinator":    "/pollinator" in cats.lower(),
+                    "is_deer_resistant":"/deer" in cats.lower(),
                 },
             })
-    rng = random.Random(seed)
-    return rng.sample(rows, min(n, len(rows)))
+    return random.Random(seed).sample(rows, min(n, len(rows)))
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    ap = argparse.ArgumentParser(description="Test enrichment prompt against plants.csv ground truth")
-    ap.add_argument("--n",        type=int,  default=5,     help="Number of random plants to test (default: 5)")
-    ap.add_argument("--seed",     type=int,  default=42,    help="Random seed for plant selection (default: 42)")
-    ap.add_argument("--dry-run",  action="store_true",      help="Print prompts only — no AI calls. Paste output into a subagent.")
-    ap.add_argument("--api-key",  type=str,  default=None,  help="Anthropic API key (overrides ANTHROPIC_API_KEY env var)")
+    ap = argparse.ArgumentParser(description="Generate enrichment prompts for subagent testing")
+    ap.add_argument("--n",    type=int, default=5,  help="Number of random plants (default: 5)")
+    ap.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
     args = ap.parse_args()
 
-    import os
-    if args.api_key:
-        os.environ["ANTHROPIC_API_KEY"] = args.api_key
+    plants = load_plants(args.n, args.seed)
+    print(f"# Enrichment prompt test — {len(plants)} plants, seed={args.seed}", file=sys.stderr)
+    print(f"# Plants: {', '.join(p['common'] for p in plants)}\n", file=sys.stderr)
 
-    test_plants = load_test_plants(args.n, args.seed)
-    print(f"Testing {len(test_plants)} plants (seed={args.seed}): {', '.join(p['common'] for p in test_plants)}\n")
-
-    total_checks = 0
-    total_pass = 0
-
-    for plant in test_plants:
-        print(f"\n{'='*60}")
-        print(f"PLANT: {plant['common']}")
+    for i, plant in enumerate(plants, 1):
+        print(f"\n{'='*60}", file=sys.stderr)
+        print(f"Fetching sources for {plant['common']}...", file=sys.stderr)
 
         context = fetch_all_sources(plant)
-        prompt = build_prompt(plant, context)
-        print(f"  Prompt: {len(prompt)} chars, context: {len(context)} chars")
 
-        if args.dry_run:
-            print(f"\n--- SYSTEM ---\n{SYSTEM_MSG}\n--- USER ---\n{prompt}\n--- GROUND TRUTH ---")
-            for k, v in plant["truth"].items():
-                print(f"  {k}: {v}")
-            continue
-
-        result = call_ai(prompt)
-        scores = compare(result, plant["truth"])
-
-        print("\n  Field results:")
-        for field in ["latin", "sun_level", "moisture", "is_pollinator", "is_deer_resistant"]:
-            mark = scores[field]
-            print(f"    {mark} {field}: got={result.get(field)!r}  expected={plant['truth'][field]!r}")
-            total_checks += 1
-            if mark == "✓":
-                total_pass += 1
-
-        print("  attributes_line segments:")
-        for seg, mark in scores["attributes"].items():
-            total_checks += 1
-            if mark == "✓":
-                total_pass += 1
-            print(f"    {mark} {seg}")
-
-        print(f"  highlight (AI): {result.get('highlight_line', '')[:110]}")
-        print(f"  highlight (GT): {plant['truth']['highlight_line'][:110]}")
-
-    if args.dry_run:
-        print("\n(dry-run: no AI calls made. Paste the prompts above into a subagent to test.)")
-        return 0
-
-    print(f"\n{'='*60}")
-    pct = (100 * total_pass // total_checks) if total_checks else 0
-    print(f"OVERALL: {total_pass}/{total_checks} checks passed ({pct}%)")
-    return 0 if total_pass == total_checks else 1
+        # Print the prompt to stdout (for piping / pasting to subagent)
+        print(f"\n{'#'*60}")
+        print(f"# PLANT {i}/{len(plants)}: {plant['common']}")
+        print(f"{'#'*60}\n")
+        print(f"SYSTEM:\n{SYSTEM_MSG}\n")
+        print(f"USER:\n{build_prompt(plant, context)}\n")
+        print("GROUND TRUTH (compare after getting AI response):")
+        for k, v in plant["truth"].items():
+            print(f"  {k}: {v}")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

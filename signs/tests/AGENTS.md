@@ -7,26 +7,24 @@ Tests the AI enrichment prompt in `public/js/enrich.js` against ground truth fro
 ```bash
 cd /Users/erik/repos/plant-sale/signs
 
-# Generate prompts for 5 random plants (no AI call — paste output into a subagent):
-python3 tests/enrich_test.py --dry-run
+# Generate prompts for 5 random plants:
+python3 tests/enrich_test.py
 
 # Different sample sizes / seeds:
-python3 tests/enrich_test.py --n 10 --seed 7 --dry-run
-
-# With an Anthropic API key (runs AI calls directly):
-python3 tests/enrich_test.py --api-key sk-ant-...
-# or: export ANTHROPIC_API_KEY=sk-ant-... && python3 tests/enrich_test.py
+python3 tests/enrich_test.py --n 10 --seed 7
 ```
 
-Requires: `pip install anthropic` (only needed for non-dry-run mode).
+No API key required. No external dependencies.
 
-### Subagent workflow (no API key needed)
-1. Run `python3 tests/enrich_test.py --dry-run` to get the system + user prompts
-2. Spawn a subagent with each prompt, asking it to:
-   - Output the JSON it would produce (acting as the AI model)
-   - Compare field-by-field to the ground truth shown
-   - List any remaining prompt issues
-3. Synthesize findings and update the prompt constants in both `enrich.js` and `enrich_test.py`
+### Testing workflow
+1. Run the script — prompts print to stdout, fetch status to stderr
+2. For each plant, spawn a subagent with the printed SYSTEM + USER prompt, asking it to:
+   - Output the JSON it would produce (acting as the production AI)
+   - Compare field-by-field to the ground truth printed below
+   - List remaining prompt issues
+3. Synthesize findings across all plants
+4. Update prompt constants in **both** `enrich.js` and `enrich_test.py`
+5. Re-run with a different `--seed` to validate on a fresh sample
 
 ## What it tests
 
