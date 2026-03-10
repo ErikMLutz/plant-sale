@@ -1,43 +1,112 @@
 // ─── AI Enrichment ────────────────────────────────────────────────────────────
-// Uses USDA Plants Service API (deterministic, no key) then OpenAI gpt-4o-mini
-// to fill in data for plants with source === 'pending'.
+// Attempts to scrape all approved sources (USDA, NCSU, Prairie Moon, FSUS, MBG)
+// then passes whatever was gathered to OpenAI gpt-4o-mini for structured extraction.
+// Each source fetch is wrapped in try/catch — CORS failures are logged and skipped.
+
+const APPROVED_SOURCES = [
+  'NCSU Plant Toolbox (plants.ces.ncsu.edu)',
+  'USDA PLANTS Database (plants.usda.gov)',
+  'Prairie Moon Nursery (prairiemoon.com)',
+  'FSUS / Flora of the Southeastern US (fsus.ncbg.unc.edu)',
+  'Missouri Botanical Garden (missouribotanicalgarden.org)',
+];
 
 /**
- * Attempt to fetch plant data from the USDA Plants Service API.
- * Returns a partial context string to inject into the AI prompt, or '' on failure.
- *
- * @param {string} commonName
- * @returns {Promise<string>}
+ * Derive a URL slug from a latin or common name.
+ * e.g. "Actaea racemosa" → "actaea-racemosa"
  */
-async function fetchUsdaContext(commonName) {
+function toSlug(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+/**
+ * Try to fetch a URL and return stripped plain text (first ~800 chars of body text).
+ * Logs all failures to console so CORS issues are visible during debugging.
+ * Returns '' on any error.
+ */
+async function tryFetchText(label, url) {
   try {
-    const encoded = encodeURIComponent(commonName);
-    const url = `https://plantsservices.sc.egov.usda.gov/api/PlantSearch?q=${encoded}&format=json`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const html = await resp.text();
+    // Strip tags and collapse whitespace; take first 800 chars of useful content
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    // Remove scripts/styles from the DOM fragment
+    div.querySelectorAll('script,style,nav,header,footer').forEach(el => el.remove());
+    const text = (div.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 800);
+    if (text) console.log(`[enrich] ✓ ${label}: fetched ${text.length} chars`);
+    return text ? `[${label}]\n${text}` : '';
+  } catch (err) {
+    // Always log so CORS failures are visible in DevTools
+    console.warn(`[enrich] ✗ ${label} (${url}): ${err.message}`);
+    return '';
+  }
+}
+
+/**
+ * Attempt to fetch plant data from the USDA Plants Service JSON API.
+ * Returns structured key/value context string, or '' on failure.
+ */
+async function fetchUsdaJson(commonName, latinName) {
+  const query = latinName || commonName;
+  try {
+    const url = `https://plantsservices.sc.egov.usda.gov/api/PlantSearch?q=${encodeURIComponent(query)}&format=json`;
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-
-    // The response is typically an array or an object with a PlantResults array
     const results = Array.isArray(data) ? data : (data.PlantResults || data.Results || []);
     if (!results.length) return '';
-
-    const plant = results[0];
+    const p = results[0];
     const parts = [];
-
-    if (plant.NativeStatus)   parts.push(`USDA native status: ${plant.NativeStatus}`);
-    if (plant.Duration)       parts.push(`Duration: ${plant.Duration}`);
-    if (plant.GrowthHabit)    parts.push(`Growth habit: ${plant.GrowthHabit}`);
-    if (plant.ActiveGrowthPeriod) parts.push(`Active growth period: ${plant.ActiveGrowthPeriod}`);
-    if (plant.MinimumTemperature) parts.push(`Min temp (°F): ${plant.MinimumTemperature}`);
-
+    if (p.NativeStatus)       parts.push(`Native status: ${p.NativeStatus}`);
+    if (p.Duration)           parts.push(`Duration: ${p.Duration}`);
+    if (p.GrowthHabit)        parts.push(`Growth habit: ${p.GrowthHabit}`);
+    if (p.ActiveGrowthPeriod) parts.push(`Active growth period: ${p.ActiveGrowthPeriod}`);
+    if (p.MinimumTemperature) parts.push(`Min temp (°F): ${p.MinimumTemperature}`);
+    if (p.ShadeTolerance)     parts.push(`Shade tolerance: ${p.ShadeTolerance}`);
+    if (p.MoistureUse)        parts.push(`Moisture use: ${p.MoistureUse}`);
+    if (p.DroughtTolerance)   parts.push(`Drought tolerance: ${p.DroughtTolerance}`);
     if (!parts.length) return '';
-    return 'USDA Plants data: ' + parts.join('; ');
+    console.log(`[enrich] ✓ USDA JSON API: ${parts.length} fields`);
+    return `[USDA Plants API]\n${parts.join('; ')}`;
   } catch (err) {
-    if (typeof DEBUG !== 'undefined' && DEBUG) {
-      console.warn('[enrich] USDA fetch failed for', commonName, '—', err.message);
-    }
+    console.warn(`[enrich] ✗ USDA JSON API: ${err.message}`);
     return '';
   }
+}
+
+/**
+ * Try all approved sources for a plant and return combined context string.
+ * All fetches run in parallel; failures are logged and skipped.
+ */
+async function fetchAllSources(plant) {
+  const latin  = plant.latin  || '';
+  const common = plant.common || '';
+  const latinSlug  = toSlug(latin);
+  const commonSlug = toSlug(common);
+
+  const attempts = [
+    // USDA structured JSON API (best data quality when it works)
+    fetchUsdaJson(common, latin),
+
+    // NCSU Plant Toolbox — try latin slug, then common slug
+    tryFetchText('NCSU Plant Toolbox', `https://plants.ces.ncsu.edu/plants/${latinSlug}/`),
+    tryFetchText('NCSU Plant Toolbox (common)', `https://plants.ces.ncsu.edu/plants/${commonSlug}/`),
+
+    // Prairie Moon Nursery
+    tryFetchText('Prairie Moon', `https://www.prairiemoon.com/plants/${latinSlug}.html`),
+
+    // FSUS
+    tryFetchText('FSUS', `https://fsus.ncbg.unc.edu/plants/${latinSlug}`),
+
+    // Missouri Botanical Garden (useful for non-natives)
+    tryFetchText('Missouri Botanical Garden',
+      `https://www.missouribotanicalgarden.org/PlantFinder/PlantFinderListPage.aspx?basic=${encodeURIComponent(latin || common)}`),
+  ];
+
+  const results = await Promise.all(attempts);
+  return results.filter(Boolean).join('\n\n');
 }
 
 /**
@@ -82,7 +151,7 @@ function buildPrompt(plant, usdaContext) {
  * @returns {Promise<object>}
  */
 async function callOpenAI(plant, apiKey, usdaContext) {
-  const systemMsg = 'You are a botanist filling in plant sale sign data. Return only valid JSON, no other text.';
+  const systemMsg = `You are a botanist filling in plant sale sign data. Use the reference data provided from approved sources (${APPROVED_SOURCES.join(', ')}) and your own botanical knowledge. Return only valid JSON, no other text.`;
   const userMsg = buildPrompt(plant, usdaContext);
 
   const resp = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -124,7 +193,7 @@ async function callOpenAI(plant, apiKey, usdaContext) {
  * @returns {Promise<object>} - updated plant object
  */
 async function enrichPlant(plant, apiKey) {
-  const usdaContext = await fetchUsdaContext(plant.common);
+  const usdaContext = await fetchAllSources(plant);
 
   let aiData;
   try {
