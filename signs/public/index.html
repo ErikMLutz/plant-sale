@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Plant Sale Sign Generator</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+</head>
+<body>
+
+<h1>Plant Sale Sign Generator</h1>
+<p class="subtitle">Generates a PowerPoint file with one sign per slide.</p>
+
+<!-- Debug panel — controlled by DEBUG in js/config.js -->
+<div id="debug-panel" style="display:none; background:#fff8e1; border:2px dashed #f39c12; border-radius:6px; padding:14px 20px; margin-bottom:20px;">
+  <div style="font-size:0.8em; font-weight:bold; color:#b7770d; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px;">
+    ⚠ Debug Mode
+  </div>
+  <div style="display:flex; flex-direction:column; gap:8px; font-family:Calibri,sans-serif; font-size:0.88em;">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <label style="display:flex; align-items:center; gap:8px; color:#555;">
+        <input type="checkbox" id="dbg-limit-enabled" checked onchange="syncDebugState()" />
+        Limit plants to
+      </label>
+      <input type="number" id="dbg-limit-value" value="10" min="1" max="9999"
+        style="width:60px; padding:3px 6px; border:1px solid #ccc; border-radius:3px; font-size:1em;"
+        onchange="syncDebugState()" />
+      <span style="color:#888;">(disable to use all plants)</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <label style="display:flex; align-items:center; gap:8px; color:#555;">
+        <input type="checkbox" id="dbg-pick-overlap" checked onchange="syncDebugState()" />
+        Pick some with legacy overlap
+      </label>
+      <span style="color:#888;">(fills limit with matches + 1 non-match for testing)</span>
+    </div>
+  </div>
+</div>
+
+<!-- Step 1: Import -->
+<div class="card" id="import-section">
+  <h2>Step 1 — Import Data</h2>
+  <div class="import-grid">
+
+    <div class="upload-area">
+      <label class="area-label" for="ss-textarea">Squarespace Export <span style="color:#c0392b">*</span></label>
+      <div class="area-note">CSV or TSV export from Squarespace Products — auto-detected</div>
+      <textarea id="ss-textarea" placeholder="Paste CSV or TSV content here…"></textarea>
+      <div class="file-row">
+        <button class="secondary" onclick="document.getElementById('ss-file').click()">Or upload file…</button>
+        <span id="ss-file-name">No file chosen</span>
+        <input type="file" id="ss-file" accept=".tsv,.csv,.txt" style="display:none" onchange="handleSsFile(this)" />
+      </div>
+    </div>
+
+    <div class="upload-area">
+      <label class="area-label">Legacy plants.csv <span style="color:#999;font-weight:normal">(optional)</span></label>
+      <div class="area-note">CSV or TSV — auto-detected. Pre-fills data from Ali's existing dataset.</div>
+      <textarea id="legacy-textarea" placeholder="Paste CSV or TSV content here…"></textarea>
+      <div class="file-row">
+        <button class="secondary" onclick="document.getElementById('legacy-file').click()">Or upload file…</button>
+        <span id="legacy-file-name">No file chosen</span>
+        <input type="file" id="legacy-file" accept=".csv,.txt,.tsv" style="display:none" onchange="handleLegacyFile(this)" />
+      </div>
+      <div class="area-hint">If provided, plants matched by name will use existing Latin name, attributes, and highlight text.</div>
+    </div>
+
+  </div>
+  <button onclick="runImport()">Import</button>
+  <div id="import-status" style="margin-top:10px;font-size:0.85em;color:#555;min-height:1.2em;"></div>
+</div>
+
+<!-- Step 2: Review + Generate -->
+<div class="card" id="review-section">
+  <h2>Step 2 — Review &amp; Edit</h2>
+  <div class="table-scroll">
+    <table id="review-table">
+      <thead>
+        <tr>
+          <th>Source</th>
+          <th>Common Name</th>
+          <th>Latin Name</th>
+          <th>Photo</th>
+          <th>Attributes</th>
+          <th>Highlight</th>
+        </tr>
+      </thead>
+      <tbody id="review-tbody"></tbody>
+    </table>
+  </div>
+  <div class="gen-row">
+    <button id="gen-btn" onclick="generatePPTX()">Generate PPTX (0 plants)</button>
+    <div id="status"></div>
+  </div>
+  <div id="progress-wrap" style="display:none; margin-top:12px;">
+    <div id="progress-label" style="font-size:0.82em; color:#555; font-family:Calibri,sans-serif; margin-bottom:4px;">Fetching photos…</div>
+    <div style="background:#e0e0d8; border-radius:4px; height:10px; overflow:hidden;">
+      <div id="progress-bar" style="height:100%; width:0%; background:#2d5a27; transition:width 0.15s ease;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Scripts: load in dependency order -->
+<script src="js/config.js"></script>
+<script src="js/parse.js"></script>
+<script src="js/images.js"></script>
+<script src="js/pptx.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>

@@ -12,11 +12,23 @@ Working directory: `/Users/erik/repos/plant-sale/signs/`
 
 ## What's Been Built
 
-### `prototype.html` — the entire app, one self-contained file
+### `public/` — the app (static site, open `index.html` directly in a browser)
 
-Open directly in a browser (no server needed). Uses:
-- **pptxgenjs** (CDN) for PPTX generation
-- No framework, no build step, plain JS
+No server, no build step, plain JS split across focused files. Uses **pptxgenjs** via CDN.
+
+```
+public/
+├── index.html        — HTML structure and script/link tags
+├── styles.css        — all styles
+└── js/
+    ├── config.js     — DEBUG flag, debugState, SLIDE_CONFIG, ICON_CONFIG
+    ├── parse.js      — CSV/TSV parsing, legacy matching, Squarespace parsing
+    ├── images.js     — fetchForPptx, convertToJpeg, estimateWrappedLines
+    ├── pptx.js       — addSignToSlide, generatePPTX, parseAttributes, buildIcons
+    └── app.js        — plants[] state, UI handlers, import flow, review table
+```
+
+Scripts load in dependency order via plain `<script>` tags at bottom of `<body>`. All globals are shared across files (no modules).
 
 #### App flow
 
@@ -161,8 +173,8 @@ Icon display logic lives in `ICON_CONFIG` — designed to be updated in code wit
 
 ## Design Principles
 
-- **One file** — `prototype.html` is the entire app. No build step, no server, no npm.
-- **DEBUG flag** — all dev-only UI behind `const DEBUG = true`. Flip to `false` to ship.
+- **Static site** — `public/index.html` opens directly in a browser. No build step, no server, no npm.
+- **DEBUG flag** — all dev-only UI behind `const DEBUG = true` in `js/config.js`. Flip to `false` to ship.
 - **Deterministic code first** — AI only for non-deterministic tasks (enriching plant descriptions)
 - **Icon logic in config** — `ICON_CONFIG` is the single place to change icon behavior
 - **Layout constants in config** — `SLIDE_CONFIG` for all dimensions/colors/fonts
