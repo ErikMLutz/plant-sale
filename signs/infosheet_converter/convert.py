@@ -24,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'piedmont_native_classifier'))
 try:
     from piedmont_check import check as _bonap_check
+    from piedmont_check import _clean_latin as _bonap_clean_latin
     BONAP_AVAILABLE = True
 except ImportError:
     BONAP_AVAILABLE = False
@@ -328,11 +329,11 @@ def bonap_check_plant(latin: str) -> tuple:
     Returns (is_native: bool | None, error: str | None).
     Uses only genus + species (first two words) for the lookup.
     """
-    words = latin.strip().split()
+    words = _bonap_clean_latin(latin).split()
     if len(words) < 2:
         return None, 'Need at least genus + species'
 
-    species_latin = f'{words[0]} {words[1]}'
+    species_latin = ' '.join(words)
 
     try:
         _, _, total, _, is_native = _bonap_check(species_latin)
@@ -441,8 +442,8 @@ def main():
         help='Skip BONAP Piedmont native checks (faster, offline)',
     )
     parser.add_argument(
-        '--bonap-workers', type=int, default=10, metavar='N',
-        help='Parallel BONAP requests (default: 10)',
+        '--bonap-workers', type=int, default=50, metavar='N',
+        help='Parallel BONAP requests (default: 50)',
     )
     args = parser.parse_args()
 

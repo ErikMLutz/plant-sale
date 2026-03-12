@@ -12,16 +12,24 @@ function parseAttributes(line) {
   }).filter(a => a.label || a.value);
 }
 
-/** Build icon strip strings from ICON_CONFIG for a plant object. */
+/**
+ * Build icon strings for both lines of the icon strip.
+ * Returns { line1: '...sun icons...', line2: '...moisture/critter/deer...' }
+ */
 function buildIcons(plant) {
-  const icons = [];
-  const sunStr  = ICON_CONFIG.sun[plant.sun_level];
-  if (sunStr) icons.push(sunStr);
+  // Line 1: all selected sun levels
+  const sunLevels = Array.isArray(plant.sun_levels) ? plant.sun_levels : [];
+  const line1 = sunLevels.map(l => ICON_CONFIG.sun[l]).filter(Boolean).join('   ');
+
+  // Line 2: moisture + critter + deer
+  const line2Parts = [];
   const moistStr = ICON_CONFIG.moisture[plant.moisture];
-  if (moistStr) icons.push(moistStr);
-  if (plant.is_pollinator)     icons.push(ICON_CONFIG.pollinator.show);
-  if (plant.is_deer_resistant) icons.push(ICON_CONFIG.deer_resistant.show);
-  return icons;
+  if (moistStr) line2Parts.push(moistStr);
+  if (plant.is_pollinator)     line2Parts.push(ICON_CONFIG.critter_friendly.show);
+  if (plant.is_deer_resistant) line2Parts.push(ICON_CONFIG.deer_resistant.show);
+  const line2 = line2Parts.join('   ');
+
+  return { line1, line2 };
 }
 
 /** Draw a muted green placeholder box in the photo area. */
@@ -42,14 +50,18 @@ function addPhotoPlaceholder(slide, yOffset, photoW, signH, colors) {
  * Render one plant sign onto a slide at vertical offset `yOffset`.
  *
  * Layout:
- *   [  Photo  |  Latin name (italic, small)   ]
- *   [  Area   |  Common Name (bold, 19pt)     ]
- *   [         |  ─────────────────────────    ]
- *   [         |  • Attribute bullets          ]
- *   [         |  Highlight text (italic)      ]
- *   [         |  ☀ 💧 🦋 🦌  icon strip      ]
+ *   [  Photo  |  Common Name (bold)            ]
+ *   [  Area   |  ──────────────────────────    ]
+ *   [         |  • Attribute bullets           ]
+ *   [         |  Highlight text (italic)       ]
+ *   [         |  ☀ ⛅  (sun icons, line 1)     ]
+ *   [         |  💧 🦋 🦌  (line 2)           ]
+ *
+ * photoDataArr: array of base64 photo data strings. All are placed at the
+ * same position so PowerPoint users can drag/resize/delete extras. First
+ * photo ends up on top.
  */
-function addSignToSlide(slide, plant, yOffset, photoData) {
+function addSignToSlide(slide, plant, yOffset, photoDataArr) {
   const C = SLIDE_CONFIG;
   const { colors, fonts } = C;
   const { signH, slideW } = C;
@@ -63,13 +75,17 @@ function addSignToSlide(slide, plant, yOffset, photoData) {
   slide.addShape('rect', { x: 0, y: yOffset, w: slideW, h: signH, fill: { color: colors.signBg }, line: { color: colors.signBg } });
   slide.addShape('rect', { x: 0, y: yOffset, w: 0.09,   h: signH, fill: { color: colors.headerGreen }, line: { color: colors.headerGreen } });
 
-  // Photo
-  if (photoData) {
-    try {
-      slide.addImage({ data: photoData, x: 0.09, y: yOffset, w: photoW - 0.09, h: signH });
-    } catch (e) {
-      console.warn('[slide] addImage failed:', e.message);
-      addPhotoPlaceholder(slide, yOffset, photoW, signH, colors);
+  // Photos — add in reverse so index 0 (first photo) ends up on top.
+  // All images occupy the same position/size; extras are hidden under the first
+  // but accessible to humans editing in PowerPoint.
+  const photos = Array.isArray(photoDataArr) ? photoDataArr.filter(Boolean) : (photoDataArr ? [photoDataArr] : []);
+  if (photos.length > 0) {
+    for (let pi = photos.length - 1; pi >= 0; pi--) {
+      try {
+        slide.addImage({ data: photos[pi], x: 0.09, y: yOffset, w: photoW - 0.09, h: signH });
+      } catch (e) {
+        console.warn('[slide] addImage failed:', e.message);
+      }
     }
   } else {
     addPhotoPlaceholder(slide, yOffset, photoW, signH, colors);
@@ -79,79 +95,80 @@ function addSignToSlide(slide, plant, yOffset, photoData) {
   const innerX = contentX + mX;
   const innerW = contentW - mX * 2;
 
-  const latinY = yOffset + mY;
-  const latinH = 0.30;
-  const commonY = latinY + latinH + 0.01;
-
-  // Canvas-based line count with 0.88 factor to compensate for PowerPoint's
-  // internal text box padding and slightly wider font rendering.
-  const commonLines = estimateWrappedLines(
-    plant.common || '',
-    (slideW - photoW - mX * 2) * 0.88,
-    fonts.common
-  );
-  const commonH  = Math.max(commonLines, 1) * 0.40; // 0.40" per line at 19pt
-  const dividerY = commonY + commonH + 0.04;
-  const dividerH = 0.02;
-  const attribY  = dividerY + dividerH + 0.07;
-
-  const iconStripH = 0.50;
-  const iconStripY = yOffset + signH - iconStripH;
-  const highlightH = 0.45;
-  const highlightY = iconStripY - highlightH - 0.08;
-  const bulletH    = highlightY - attribY - 0.04;
-
-  // Latin name
-  slide.addText(plant.latin || '', {
-    x: innerX, y: latinY, w: innerW, h: latinH,
-    fontSize: fonts.latin.size, fontFace: fonts.latin.name,
-    italic: true, color: colors.accentGreen, valign: 'bottom', wrap: true,
-  });
-
-  // Common name
-  slide.addText(plant.common || '', {
-    x: innerX, y: commonY, w: innerW, h: commonH,
-    fontSize: fonts.common.size, fontFace: fonts.common.name,
-    bold: true, color: colors.headerGreen, valign: 'top', wrap: true, autoFit: false,
-  });
-
-  // Divider
-  slide.addShape('line', {
-    x: innerX, y: dividerY, w: innerW, h: 0,
-    line: { color: colors.headerGreen, width: 1.5 },
-  });
-
-  // Attribute bullets
-  const attrs    = parseAttributes(plant.attributes_line);
-  const attrRuns = [];
-  attrs.forEach((attr, i) => {
-    if (i > 0) attrRuns.push({ text: '\n', options: { fontSize: fonts.attribute.size } });
-    attrRuns.push({ text: '• ', options: { fontSize: fonts.attribute.size, color: colors.accentGreen, bold: true } });
-    if (attr.label) {
-      attrRuns.push({ text: attr.label + ': ', options: { fontSize: fonts.attribute.size, bold: true, color: colors.bodyText, fontFace: fonts.attribute.name } });
-    }
-    attrRuns.push({ text: attr.value, options: { fontSize: fonts.attribute.size, bold: false, color: colors.bodyText, fontFace: fonts.attribute.name } });
-  });
-  if (attrRuns.length > 0) {
-    slide.addText(attrRuns, { x: innerX, y: attribY, w: innerW, h: bulletH, valign: 'top', wrap: true, paraSpaceAfter: 1 });
-  }
-
-  // Highlight text
-  if (plant.highlight_line) {
-    slide.addText(plant.highlight_line, {
-      x: innerX, y: highlightY, w: innerW, h: highlightH,
-      fontSize: fonts.highlight.size, fontFace: fonts.highlight.name,
-      italic: true, color: colors.highlightText, valign: 'top', wrap: true,
+  // Piedmont native badge — golden circle in the top-left corner of the sign
+  if (plant.piedmont_native) {
+    const badgeD = 1.0;
+    const badgeX = 0.05;
+    const badgeY = yOffset + 0.05;
+    slide.addShape('star32', {
+      x: badgeX, y: badgeY, w: badgeD, h: badgeD,
+      fill: { color: colors.piedmontBadge },
+      line: { color: colors.piedmontBadge },
+    });
+    slide.addText('NC\nPiedmont\nNative', {
+      x: badgeX, y: badgeY, w: badgeD, h: badgeD,
+      fontSize: 9, fontFace: 'Calibri',
+      bold: true, color: colors.piedmontBadgeText,
+      align: 'center', valign: 'middle',
     });
   }
 
-  // Icon strip
-  slide.addShape('rect', { x: contentX, y: iconStripY, w: contentW, h: iconStripH, fill: { color: colors.iconBg }, line: { color: colors.iconBg } });
-  slide.addText(buildIcons(plant).join('   '), {
-    x: innerX, y: iconStripY, w: innerW, h: iconStripH,
-    fontSize: fonts.icon.size, fontFace: fonts.icon.name,
-    color: colors.bodyText, valign: 'middle', wrap: false,
+  const iconStripH = 0.65;  // tall enough for 2 lines
+  const iconStripY = yOffset + signH - iconStripH;
+  const textBoxY   = yOffset + mY;
+  const textBoxH   = iconStripY - textBoxY - 0.05;
+
+  // Combined text box: common name + attributes + highlight
+  const attrs = parseAttributes(plant.attributes_line);
+  const combinedRuns = [];
+
+  // Common name
+  combinedRuns.push({
+    text: plant.common || '',
+    options: { fontSize: fonts.common.size, fontFace: fonts.common.name, bold: true, color: colors.headerGreen, breakLine: true },
   });
+
+  // Spacer between title and attributes
+  combinedRuns.push({ text: ' ', options: { fontSize: 6, breakLine: true } });
+
+  // Attribute bullets
+  attrs.forEach(attr => {
+    combinedRuns.push({ text: '• ', options: { fontSize: fonts.attribute.size, color: colors.accentGreen, bold: true, fontFace: fonts.attribute.name } });
+    if (attr.label) {
+      combinedRuns.push({ text: attr.label + ': ', options: { fontSize: fonts.attribute.size, bold: true, color: colors.bodyText, fontFace: fonts.attribute.name } });
+    }
+    combinedRuns.push({ text: attr.value, options: { fontSize: fonts.attribute.size, bold: false, color: colors.bodyText, fontFace: fonts.attribute.name, breakLine: true } });
+  });
+
+  // Spacer between attributes and highlight
+  if (plant.highlight_line) {
+    combinedRuns.push({ text: ' ', options: { fontSize: 8, breakLine: true } });
+    combinedRuns.push({
+      text: plant.highlight_line,
+      options: { fontSize: fonts.highlight.size, fontFace: fonts.highlight.name, italic: true, color: colors.highlightText },
+    });
+  }
+
+  slide.addText(combinedRuns, { x: innerX, y: textBoxY, w: innerW, h: textBoxH, valign: 'top', wrap: true, autoFit: false });
+
+  // Icon strip — 2 lines
+  slide.addShape('rect', { x: contentX, y: iconStripY, w: contentW, h: iconStripH, fill: { color: colors.iconBg }, line: { color: colors.iconBg } });
+  const icons = buildIcons(plant);
+  const iconLineH = iconStripH / 2;
+  if (icons.line1) {
+    slide.addText(icons.line1, {
+      x: innerX, y: iconStripY + 0.04, w: innerW, h: iconLineH,
+      fontSize: fonts.icon.size, fontFace: fonts.icon.name,
+      color: colors.bodyText, valign: 'top', wrap: false,
+    });
+  }
+  if (icons.line2) {
+    slide.addText(icons.line2, {
+      x: innerX, y: iconStripY + iconLineH, w: innerW, h: iconLineH,
+      fontSize: fonts.icon.size, fontFace: fonts.icon.name,
+      color: colors.bodyText, valign: 'top', wrap: false,
+    });
+  }
 }
 
 // ─── Main generation function ─────────────────────────────────────────────────
@@ -176,18 +193,20 @@ async function generatePPTX() {
   progressWrap.style.display = 'block';
   progressBar.style.width    = '0%';
 
-  // Fetch photos with limited concurrency so the progress bar fills gradually.
+  // Fetch all photos for each plant with limited concurrency.
+  // Multiple photos per plant are stacked on the slide; humans can drag/delete.
   // CONCURRENCY = 4: safe for most hardware (Canvas WebP→JPEG is CPU-bound).
   const CONCURRENCY = 4;
   let completed = 0;
 
-  const photoDataArr = await (async () => {
+  const photoDataArrs = await (async () => {
     const results = new Array(plants.length);
     let nextIdx   = 0;
     async function worker() {
       while (nextIdx < plants.length) {
         const i    = nextIdx++;
-        results[i] = await fetchForPptx(plants[i].photo_urls?.[0] ?? null);
+        const urls = plants[i].photo_urls || [];
+        results[i] = await Promise.all(urls.map(u => fetchForPptx(u)));
         completed++;
         const pct = Math.round((completed / plants.length) * 100);
         progressBar.style.width    = pct + '%';
@@ -198,6 +217,7 @@ async function generatePPTX() {
     return results;
   })();
 
+  const slideCount = Math.ceil(plants.length / 2);
   const estSecs = Math.ceil(plants.length / 2);
   const estStr  = estSecs >= 60
     ? `up to ${Math.ceil(estSecs / 60)} minute${Math.ceil(estSecs / 60) > 1 ? 's' : ''}`
@@ -209,17 +229,26 @@ async function generatePPTX() {
     pptx.defineLayout({ name: 'SIGN_LAYOUT', width: SLIDE_CONFIG.slideW, height: SLIDE_CONFIG.slideH });
     pptx.layout = 'SIGN_LAYOUT';
 
-    for (let i = 0; i < plants.length; i++) {
+    const signH  = SLIDE_CONFIG.signH;
+    const cutGap = SLIDE_CONFIG.cutGap;
+
+    // Two plants per slide, stacked vertically with a cut gap between them.
+    for (let i = 0; i < plants.length; i += 2) {
       const slide = pptx.addSlide();
       slide.background = { color: SLIDE_CONFIG.colors.signBg };
-      addSignToSlide(slide, plants[i], 0, photoDataArr[i]);
+
+      addSignToSlide(slide, plants[i], 0, photoDataArrs[i]);
+
+      if (plants[i + 1]) {
+        addSignToSlide(slide, plants[i + 1], signH + cutGap, photoDataArrs[i + 1]);
+      }
     }
 
     await pptx.writeFile({ fileName: 'plant-sale-signs.pptx' });
 
     progressWrap.style.display = 'none';
     status.className   = 'success';
-    status.textContent = `✓ Downloaded plant-sale-signs.pptx (${plants.length} slides) successfully!`;
+    status.textContent = `✓ Downloaded plant-sale-signs.pptx (${plants.length} plants, ${slideCount} slides) successfully!`;
   } catch (err) {
     console.error('[pptx] Generation failed:', err);
     progressWrap.style.display = 'none';

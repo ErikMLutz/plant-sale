@@ -12,7 +12,7 @@
 <div style="display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px;">
   <div>
     <h1 style="margin:0;">Plant Sale Sign Generator</h1>
-    <p class="subtitle" style="margin:4px 0 0;">Generates a PowerPoint file with one sign per slide.</p>
+    <p class="subtitle" style="margin:4px 0 0;">Generates a PowerPoint file with two signs per 8.5×11" slide, ready to print and cut.</p>
   </div>
   <label style="display:flex; align-items:center; gap:6px; font-size:0.8em; font-family:Calibri,sans-serif; color:#aaa; cursor:pointer; user-select:none;">
     <input type="checkbox" id="debug-toggle" onchange="toggleDebug(this.checked)" style="cursor:pointer;" />
@@ -53,24 +53,56 @@
       <div>
         <div style="font-size:0.88em; font-weight:bold; color:#444; font-family:Calibri,sans-serif; margin-bottom:4px;">Slide size</div>
         <div style="font-size:0.85em; color:#777; font-family:Calibri,sans-serif; margin-bottom:10px;">
-          Set these to match your PowerPoint template before generating.
-          The defaults (7.75 × 4.75 in) are standard for this sale's sign layout.
-          Only change if your printer or template requires a different canvas size.
+          8.5 × 11 in (letter) fits two signs per page for printing and cutting.
+          The cut gap is blank whitespace between the two signs.
         </div>
         <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; font-family:Calibri,sans-serif; font-size:0.88em; color:#555;">
           <label style="display:flex; align-items:center; gap:6px;">
             Width (in):
-            <input type="number" id="cfg-slide-w" value="7.75" min="1" max="24" step="0.25"
+            <input type="number" id="cfg-slide-w" value="8.5" min="1" max="24" step="0.25"
               style="width:70px; padding:3px 6px; border:1px solid #ccc; border-radius:3px; font-size:1em;"
               onchange="syncSettings()" />
           </label>
           <label style="display:flex; align-items:center; gap:6px;">
             Height (in):
-            <input type="number" id="cfg-slide-h" value="4.75" min="1" max="24" step="0.25"
+            <input type="number" id="cfg-slide-h" value="11.0" min="1" max="24" step="0.25"
               style="width:70px; padding:3px 6px; border:1px solid #ccc; border-radius:3px; font-size:1em;"
               onchange="syncSettings()" />
           </label>
-          <span style="color:#aaa; font-size:0.9em;">Default: 7.75 × 4.75 in</span>
+          <label style="display:flex; align-items:center; gap:6px;">
+            Cut gap (in):
+            <input type="number" id="cfg-cut-gap" value="0.125" min="0" max="2" step="0.0625"
+              style="width:70px; padding:3px 6px; border:1px solid #ccc; border-radius:3px; font-size:1em;"
+              onchange="syncSettings()" />
+          </label>
+          <span style="color:#aaa; font-size:0.9em;">Default: 8.5 × 11 in, 1/8" gap</span>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:0.88em; font-weight:bold; color:#444; font-family:Calibri,sans-serif; margin-bottom:4px;">Font sizes (pt)</div>
+        <div style="font-size:0.85em; color:#777; font-family:Calibri,sans-serif; margin-bottom:10px;">
+          Adjust to taste. Changes take effect on the next PPTX generation.
+        </div>
+        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; font-family:Calibri,sans-serif; font-size:0.88em; color:#555;">
+          <label style="display:flex; align-items:center; gap:6px;">
+            Title (common name):
+            <input type="number" id="cfg-font-common" value="24" min="8" max="72" step="1"
+              style="width:60px; padding:3px 6px; border:1px solid #ccc; border-radius:3px; font-size:1em;"
+              onchange="syncSettings()" />
+          </label>
+          <label style="display:flex; align-items:center; gap:6px;">
+            Attributes:
+            <input type="number" id="cfg-font-attrib" value="18" min="6" max="36" step="0.5"
+              style="width:60px; padding:3px 6px; border:1px solid #ccc; border-radius:3px; font-size:1em;"
+              onchange="syncSettings()" />
+          </label>
+          <label style="display:flex; align-items:center; gap:6px;">
+            Highlight:
+            <input type="number" id="cfg-font-highlight" value="20" min="6" max="36" step="0.5"
+              style="width:60px; padding:3px 6px; border:1px solid #ccc; border-radius:3px; font-size:1em;"
+              onchange="syncSettings()" />
+          </label>
         </div>
       </div>
 
@@ -181,8 +213,8 @@
   <div style="background:#fde8e8; border:2px solid #c0392b; border-radius:6px; padding:12px 16px; margin-bottom:14px;">
     <strong style="color:#7b1c1c;">⚠ Security warning:</strong>
     <span style="color:#7b1c1c; font-family:Calibri,sans-serif; font-size:0.88em;">
-      Never enter an API key on a website you don't personally own and trust — the site owner can steal it and charge API calls to your account.
-      Only use this if you downloaded this file and are opening it directly in your own browser (not via a shared URL).
+      Never enter an API key on a website you don't personally own and/or trust — the site owner can steal it and charge API calls to your account.
+      Only use this if you truly trust the site and know it's source/origin.
     </span>
   </div>
   <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap;">
@@ -223,6 +255,7 @@
     <li><strong>Copy prompt + AI</strong> — click <em>Copy prompt</em> on any row, paste into ChatGPT or Claude, copy the JSON output, then click <em>Fill from clipboard</em> to apply it. Works without an API key.</li>
     <li><strong>Manual edit</strong> — type directly into the Latin name, Attributes, Highlight, and icon fields. The row will be marked Manually Enriched.</li>
   </ol>
+  <div id="review-summary" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;"></div>
   <div class="table-scroll">
     <table id="review-table">
       <thead>

@@ -62,9 +62,14 @@ function parseDelimited(text) {
 
 /**
  * Parse plants.csv into a Map keyed by normalized common name.
- * Supports both the original format (categories column with /tag flags)
- * and the enriched format (direct sun_level, moisture, is_pollinator, is_deer_resistant columns).
- * Expected headers: latin, common, attributes_line, highlight_line, [page, categories, photo_file]
+ * Supports:
+ *   - Original format: categories column with /tag flags
+ *   - Enriched format: direct sun_level / sun_levels, moisture, is_pollinator,
+ *     is_deer_resistant, piedmont_native, flag_for_review, reason_for_review columns
+ *
+ * sun_levels is stored as pipe-separated (e.g. "full_sun|part_shade") in the
+ * enriched CSV. The older sun_level single-value column is also accepted and
+ * wrapped into an array for backward compatibility.
  */
 function parsePlantsCsv(text) {
   const map = new Map();
@@ -73,28 +78,34 @@ function parsePlantsCsv(text) {
 
   // Detect whether this CSV has direct icon columns (enriched format) or old categories column
   const firstRow = rows[0] || {};
-  const hasDirectIconCols = 'sun_level' in firstRow;
+  const hasDirectIconCols = 'sun_level' in firstRow || 'sun_levels' in firstRow;
 
   for (const row of rows) {
     const common = row['common'] || '';
     if (!common) continue;
 
-    let sun_level, moisture, is_pollinator, is_deer_resistant;
+    let sun_levels, moisture, is_pollinator, is_deer_resistant;
 
     if (hasDirectIconCols) {
       // Enriched CSV format: direct columns
-      sun_level         = row['sun_level']         || '';
+      if ('sun_levels' in row) {
+        // New pipe-separated format
+        sun_levels = (row['sun_levels'] || '').split('|').map(s => s.trim()).filter(Boolean);
+      } else {
+        // Old single-value sun_level — wrap in array
+        const sl = row['sun_level'] || '';
+        sun_levels = sl ? [sl] : [];
+      }
       moisture          = row['moisture']          || 'average';
       is_pollinator     = row['is_pollinator']     === 'true';
       is_deer_resistant = row['is_deer_resistant'] === 'true';
     } else {
       // Original format: derive from categories tag column
       const cats = (row['categories'] || '').toLowerCase();
-      if (cats.includes('/sun') && cats.includes('/part-shade')) sun_level = 'part_shade';
-      else if (cats.includes('/part-shade')) sun_level = 'part_shade';
-      else if (cats.includes('/sun'))        sun_level = 'full_sun';
-      else if (cats.includes('/shade'))      sun_level = 'shade';
-      else sun_level = '';
+      sun_levels = [];
+      if (cats.includes('/sun'))        sun_levels.push('full_sun');
+      if (cats.includes('/part-shade')) sun_levels.push('part_shade');
+      if (cats.includes('/shade') && !cats.includes('/part-shade')) sun_levels.push('shade');
 
       moisture = 'average';
       if (cats.includes('/drought'))                                   moisture = 'drought';
@@ -104,25 +115,86 @@ function parsePlantsCsv(text) {
       is_deer_resistant = cats.includes('/deer');
     }
 
+    const parseBool = v => v === 'true' || v === 'True' || v === '1' || v === 'yes';
+
     // Preserve enrichment source type if present, otherwise default to 'csv'
     const rawSource = row['source'] || '';
     const source = ['ai_enriched', 'manually_enriched'].includes(rawSource) ? rawSource : 'csv';
 
     map.set(normalizeName(common), {
-      latin:           row['latin']           || '',
+      latin:            row['latin']            || '',
       common,
-      attributes_line: row['attributes_line'] || '',
-      highlight_line:  row['highlight_line']  || '',
-      categories:      row['categories']      || '',
-      photo_file:      row['photo_file']      || '',
-      sun_level,
+      attributes_line:  row['attributes_line']  || '',
+      highlight_line:   row['highlight_line']   || '',
+      categories:       row['categories']       || '',
+      photo_file:       row['photo_file']       || '',
+      sun_levels,
       moisture,
       is_pollinator,
       is_deer_resistant,
+      piedmont_native:   parseBool(row['piedmont_native']),
+      flag_for_review:   parseBool(row['flag_for_review']),
+      reason_for_review: row['reason_for_review'] || '',
       source,
     });
   }
   return map;
+}
+
+/**
+ * Compare plants.csv icon flags against Squarespace Categories/Tags for a matched plant.
+ * When contradictions are found, sets flag_for_review=true and appends to reason_for_review.
+ * Modifies plant in-place; no-ops for pending plants (no CSV data to compare).
+ */
+function checkCsvVsSquarespaceContradictions(plant) {
+  if (plant.source === 'pending') return;
+
+  const combined = ((plant.category || '') + ' ' + (plant.tags || '')).toLowerCase();
+  const ssCat = s => combined.includes(s);
+  const reasons = [];
+
+  // Pollinator
+  const ssPollinator = ssCat('/pollinator');
+  if (ssPollinator !== plant.is_pollinator) {
+    reasons.push(
+      `pollinator: Squarespace=${ssPollinator ? 'yes' : 'no'}, CSV=${plant.is_pollinator ? 'yes' : 'no'}`
+    );
+  }
+
+  // Deer resistant
+  const ssDeer = ssCat('/deer');
+  if (ssDeer !== plant.is_deer_resistant) {
+    reasons.push(
+      `deer resistant: Squarespace=${ssDeer ? 'yes' : 'no'}, CSV=${plant.is_deer_resistant ? 'yes' : 'no'}`
+    );
+  }
+
+  // Sun — only compare if both sides have explicit data
+  const ssSun = [];
+  if (ssCat('/sun') && !ssCat('/part-shade')) ssSun.push('full_sun');
+  if (ssCat('/part-shade'))                   ssSun.push('part_shade');
+  if (ssCat('/shade') && !ssCat('/part-shade')) ssSun.push('shade');
+  const csvSun = plant.sun_levels || [];
+  if (ssSun.length > 0 && csvSun.length > 0) {
+    const mismatch = ssSun.some(v => !csvSun.includes(v)) || csvSun.some(v => !ssSun.includes(v));
+    if (mismatch) {
+      reasons.push(`sun: Squarespace=[${ssSun.join(',')}], CSV=[${csvSun.join(',')}]`);
+    }
+  }
+
+  // Moisture — only compare if Squarespace has an explicit moisture category
+  const ssMoisture = ssCat('/drought') ? 'drought'
+    : (ssCat('/rain-garden') || ssCat('/wet')) ? 'wet'
+    : null;
+  if (ssMoisture && plant.moisture && ssMoisture !== plant.moisture) {
+    reasons.push(`moisture: Squarespace=${ssMoisture}, CSV=${plant.moisture}`);
+  }
+
+  if (reasons.length > 0) {
+    plant.flag_for_review = true;
+    const existing = plant.reason_for_review ? plant.reason_for_review + '; ' : '';
+    plant.reason_for_review = existing + 'SS vs CSV: ' + reasons.join('; ');
+  }
 }
 
 /**
@@ -165,18 +237,21 @@ function parseSquarespaceRows(rows, csvMap) {
     const match = csvMap ? findCsvMatch(title, csvMap) : null;
 
     result.push({
-      common:           title,
+      common:            title,
       description,
       category,
       tags,
       photo_urls,
-      latin:            match ? match.latin           : '',
-      attributes_line:  match ? match.attributes_line : '',
-      highlight_line:   match ? match.highlight_line  : '',
-      sun_level:        match ? match.sun_level        : '',
-      moisture:         match ? match.moisture         : '',
-      is_pollinator:    match ? match.is_pollinator    : false,
-      is_deer_resistant: match ? match.is_deer_resistant : false,
+      latin:             match ? match.latin             : '',
+      attributes_line:   match ? match.attributes_line   : '',
+      highlight_line:    match ? match.highlight_line    : '',
+      sun_levels:        match ? (match.sun_levels || []) : [],
+      moisture:          match ? match.moisture           : '',
+      is_pollinator:     match ? match.is_pollinator      : false,
+      is_deer_resistant: match ? match.is_deer_resistant  : false,
+      piedmont_native:   match ? !!match.piedmont_native  : false,
+      flag_for_review:   match ? !!match.flag_for_review  : false,
+      reason_for_review: match ? (match.reason_for_review || '') : '',
       source: match ? (match.source || 'csv') : 'pending',
     });
   }

@@ -179,11 +179,16 @@ async function enrichPlant(plant, apiKey) {
 
   const merged = { ...plant };
 
-  const stringFields = ['latin', 'attributes_line', 'highlight_line', 'sun_level', 'moisture'];
+  const stringFields = ['latin', 'attributes_line', 'highlight_line', 'moisture'];
   for (const field of stringFields) {
     if (!merged[field] && aiData[field]) {
       merged[field] = aiData[field];
     }
+  }
+
+  // AI returns sun_level as a string; convert to sun_levels array
+  if ((!merged.sun_levels || merged.sun_levels.length === 0) && aiData.sun_level) {
+    merged.sun_levels = [aiData.sun_level];
   }
 
   if (!merged.is_pollinator && aiData.is_pollinator === true) {

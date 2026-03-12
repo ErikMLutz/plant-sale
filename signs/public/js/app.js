@@ -88,6 +88,7 @@ function runImport() {
     }
 
     plants = parseSquarespaceRows(filteredRows, csvMap);
+    if (csvMap.size > 0) plants.forEach(checkCsvVsSquarespaceContradictions);
 
     // Apply debug plant limit
     if (DEBUG && debugState.limitEnabled && plants.length > debugState.limitValue) {
@@ -108,13 +109,15 @@ function runImport() {
       return;
     }
 
-    const csvCount = plants.filter(p => p.source === 'csv').length;
+    const csvCount    = plants.filter(p => p.source === 'csv').length;
+    const reviewCount = plants.filter(p => p.flag_for_review).length;
     statusEl.style.color = '#2d5a27';
     statusEl.textContent =
       `Imported ${plants.length} plants. ` +
       (csvMap.size > 0
         ? `${csvCount} matched from plants.csv, ${plants.length - csvCount} need enrichment.`
-        : 'No plants.csv provided — all plants need enrichment.');
+        : 'No plants.csv provided — all plants need enrichment.') +
+      (reviewCount > 0 ? ` ${reviewCount} flagged for review.` : '');
 
     buildReviewTable();
 
@@ -148,6 +151,8 @@ const SOURCE_BADGE = {
   manually_enriched:  { cls: 'badge-manually-enriched', text: '🟣 Manually Enriched' },
 };
 
+const REVIEW_BADGE = { cls: 'badge-review-needed', text: '🔴 Review needed' };
+
 const SOURCE_ORDER = { pending: 0, ai_enriched: 1, manually_enriched: 2, csv: 3 };
 const PAGE_SIZE = 10;
 let currentPage = 1;
@@ -161,21 +166,50 @@ function applyBadge(badge, source) {
 function markManuallyEnriched(idx, tr) {
   if (plants[idx].source === 'pending') return;  // pending stays pending
   plants[idx].source = 'manually_enriched';
-  const badge = tr.querySelector('.badge');
+  const badge = tr.querySelector('.source-badge');
   if (badge) applyBadge(badge, 'manually_enriched');
+  renderSummary();
 }
 
 function getSortedPlants() {
   return [...plants].sort((a, b) => {
+    // flag_for_review always sorts first
+    if (a.flag_for_review !== b.flag_for_review) return a.flag_for_review ? -1 : 1;
     const ao = SOURCE_ORDER[a.source] ?? 99;
     const bo = SOURCE_ORDER[b.source] ?? 99;
     return ao - bo;
   });
 }
 
+function renderSummary() {
+  const el = document.getElementById('review-summary');
+  if (!el) return;
+  if (!plants.length) { el.innerHTML = ''; return; }
+
+  const review   = plants.filter(p => p.flag_for_review).length;
+  const pending  = plants.filter(p => p.source === 'pending').length;
+  const csv      = plants.filter(p => p.source === 'csv').length;
+  const ai       = plants.filter(p => p.source === 'ai_enriched').length;
+  const manual   = plants.filter(p => p.source === 'manually_enriched').length;
+
+  const chips = [
+    { show: review,  cls: 'badge-review-needed',     label: `🔴 ${review} review needed` },
+    { show: pending, cls: 'badge-pending',            label: `🟡 ${pending} needs enrichment` },
+    { show: csv,     cls: 'badge-csv',                label: `🟢 ${csv} from plants.csv` },
+    { show: ai,      cls: 'badge-ai-enriched',        label: `🔵 ${ai} AI enriched` },
+    { show: manual,  cls: 'badge-manually-enriched',  label: `🟣 ${manual} manually enriched` },
+  ];
+
+  el.innerHTML = chips
+    .filter(c => c.show > 0)
+    .map(c => `<span class="badge ${c.cls} summary-chip">${c.label}</span>`)
+    .join('');
+}
+
 function buildReviewTable() {
   currentPage = 1;
   renderPage();
+  renderSummary();
   document.getElementById('gen-btn').textContent = `Generate PPTX (${plants.length} plants)`;
 }
 
@@ -194,14 +228,34 @@ function renderPage() {
     const tr = document.createElement('tr');
     tr.dataset.idx = idx;
 
-    // Pre-declare all editable input refs so the fill-from-clipboard handler
-    // (built in the source cell, first) can close over them.
-    let latinInput, attribArea, highlightArea, sunSelect, moistureSelect, pollinatorCheck, deerCheck;
+    // Pre-declare refs for fill-from-clipboard handler
+    let latinInput, attribArea, highlightArea, moistureSelect, pollinatorCheck, deerCheck;
+    // Sun is now multi-select checkboxes; track by value key
+    const sunChecks = {};
 
     // ── Source badge + action buttons ──────────────────────────────────────────
     const tdSource = document.createElement('td');
     tdSource.className = 'td-source';
-    const badge    = document.createElement('span');
+
+    // Review needed badge (shown above source badge when flagged)
+    if (plant.flag_for_review) {
+      const reviewBadge = document.createElement('span');
+      reviewBadge.className   = 'badge ' + REVIEW_BADGE.cls;
+      reviewBadge.textContent = REVIEW_BADGE.text;
+      if (plant.reason_for_review) {
+        reviewBadge.title = plant.reason_for_review;
+      }
+      tdSource.appendChild(reviewBadge);
+      if (plant.reason_for_review) {
+        const reasonEl = document.createElement('div');
+        reasonEl.className   = 'review-reason';
+        reasonEl.textContent = plant.reason_for_review;
+        tdSource.appendChild(reasonEl);
+      }
+    }
+
+    const badge = document.createElement('span');
+    badge.className = 'source-badge';
     applyBadge(badge, plant.source);
     tdSource.appendChild(badge);
 
@@ -218,6 +272,7 @@ function renderPage() {
       plants[idx] = updated;
       if (!updated.enrichError) {
         applyEnrichedDataToRow(tr, badge, updated);
+        renderSummary();
         const pendingCount = plants.filter(p => p.source === 'pending').length;
         document.getElementById('enrich-btn-all').textContent = `Enrich all (${pendingCount}) pending plants`;
       }
@@ -275,13 +330,23 @@ function renderPage() {
       if (data.latin)           { plants[idx].latin           = data.latin;           latinInput.value     = data.latin; }
       if (data.attributes_line) { plants[idx].attributes_line = data.attributes_line; attribArea.value     = data.attributes_line; }
       if (data.highlight_line)  { plants[idx].highlight_line  = data.highlight_line;  highlightArea.value  = data.highlight_line; }
-      if (data.sun_level)       { plants[idx].sun_level       = data.sun_level;       sunSelect.value      = data.sun_level; }
-      if (data.moisture)        { plants[idx].moisture        = data.moisture;        moistureSelect.value = data.moisture; }
+
+      // Accept sun_levels (array) or sun_level (string, from AI output)
+      const sunFromData = Array.isArray(data.sun_levels)
+        ? data.sun_levels
+        : (data.sun_level ? [data.sun_level] : null);
+      if (sunFromData) {
+        plants[idx].sun_levels = sunFromData;
+        Object.entries(sunChecks).forEach(([v, cb]) => { cb.checked = sunFromData.includes(v); });
+      }
+
+      if (data.moisture) { plants[idx].moisture = data.moisture; moistureSelect.value = data.moisture; }
       if (typeof data.is_pollinator     === 'boolean') { plants[idx].is_pollinator     = data.is_pollinator;     pollinatorCheck.checked = data.is_pollinator; }
       if (typeof data.is_deer_resistant === 'boolean') { plants[idx].is_deer_resistant = data.is_deer_resistant; deerCheck.checked       = data.is_deer_resistant; }
 
       plants[idx].source = 'ai_enriched';
       applyBadge(badge, 'ai_enriched');
+      renderSummary();
     });
     tdSource.appendChild(fillBtn);
 
@@ -339,17 +404,41 @@ function renderPage() {
     tdHighlight.appendChild(highlightArea);
     tr.appendChild(tdHighlight);
 
-    // ── Icon fields: sun, moisture, pollinator, deer ────────────────────────────
+    // ── Icon fields: sun (multi), moisture, critter, deer ──────────────────────
     const tdIcons = document.createElement('td');
-    tdIcons.style.minWidth = '130px';
+    tdIcons.style.minWidth = '140px';
     tdIcons.className = 'icon-fields';
 
-    sunSelect = document.createElement('select');
-    [['', '— sun —'], ['full_sun', 'Full sun'], ['part_shade', 'Part shade'], ['shade', 'Shade']].forEach(([v, l]) => {
-      const o = document.createElement('option'); o.value = v; o.textContent = l; sunSelect.appendChild(o);
+    const makeCheckRow = (label, checked, onChange, dataAttrs) => {
+      const row = document.createElement('label');
+      row.className = 'icon-check-row';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = checked;
+      if (dataAttrs) Object.entries(dataAttrs).forEach(([k, v]) => cb.dataset[k] = v);
+      cb.addEventListener('change', () => { onChange(cb.checked); markManuallyEnriched(idx, tr); });
+      row.appendChild(cb);
+      row.append(' ' + label);
+      return { row, cb };
+    };
+
+    // Sun — multi-select checkboxes
+    const sunLabel = document.createElement('div');
+    sunLabel.className   = 'icon-group-label';
+    sunLabel.textContent = 'Sun:';
+    tdIcons.appendChild(sunLabel);
+
+    [['full_sun', 'Full sun'], ['part_shade', 'Part shade'], ['shade', 'Shade']].forEach(([v, l]) => {
+      const { row, cb } = makeCheckRow(l, (plant.sun_levels || []).includes(v), checked => {
+        if (checked) {
+          if (!plants[idx].sun_levels) plants[idx].sun_levels = [];
+          if (!plants[idx].sun_levels.includes(v)) plants[idx].sun_levels.push(v);
+        } else {
+          plants[idx].sun_levels = (plants[idx].sun_levels || []).filter(s => s !== v);
+        }
+      }, { sunValue: v });
+      sunChecks[v] = cb;
+      tdIcons.appendChild(row);
     });
-    sunSelect.value = plant.sun_level || '';
-    sunSelect.addEventListener('change', () => { plants[idx].sun_level = sunSelect.value; markManuallyEnriched(idx, tr); });
 
     moistureSelect = document.createElement('select');
     [['', '— moisture —'], ['wet', 'Wet'], ['average', 'Average'], ['drought', 'Drought']].forEach(([v, l]) => {
@@ -357,26 +446,14 @@ function renderPage() {
     });
     moistureSelect.value = plant.moisture || '';
     moistureSelect.addEventListener('change', () => { plants[idx].moisture = moistureSelect.value; markManuallyEnriched(idx, tr); });
+    tdIcons.appendChild(moistureSelect);
 
-    const makeCheckRow = (label, checked, onChange) => {
-      const row = document.createElement('label');
-      row.className = 'icon-check-row';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox'; cb.checked = checked;
-      cb.addEventListener('change', () => { onChange(cb.checked); markManuallyEnriched(idx, tr); });
-      row.appendChild(cb);
-      row.append(' ' + label);
-      return { row, cb };
-    };
-
-    const { row: pollinatorRow, cb: _pollinatorCheck } = makeCheckRow('Pollinator', plant.is_pollinator, v => { plants[idx].is_pollinator = v; });
-    pollinatorCheck = _pollinatorCheck;
-    const { row: deerRow, cb: _deerCheck } = makeCheckRow('Deer resistant', plant.is_deer_resistant, v => { plants[idx].is_deer_resistant = v; });
+    const { row: critterRow, cb: _critterCheck } = makeCheckRow('Critter friendly', plant.is_pollinator, v => { plants[idx].is_pollinator = v; }, { critterCheck: '1' });
+    pollinatorCheck = _critterCheck;
+    const { row: deerRow, cb: _deerCheck } = makeCheckRow('Deer resistant', plant.is_deer_resistant, v => { plants[idx].is_deer_resistant = v; }, { deerCheck: '1' });
     deerCheck = _deerCheck;
 
-    tdIcons.appendChild(sunSelect);
-    tdIcons.appendChild(moistureSelect);
-    tdIcons.appendChild(pollinatorRow);
+    tdIcons.appendChild(critterRow);
     tdIcons.appendChild(deerRow);
     tr.appendChild(tdIcons);
 
@@ -428,7 +505,11 @@ function downloadEnrichedCsv() {
       : s;
   }
 
-  const headers = ['latin', 'common', 'attributes_line', 'highlight_line', 'sun_level', 'moisture', 'is_pollinator', 'is_deer_resistant', 'source'];
+  const headers = [
+    'latin', 'common', 'attributes_line', 'highlight_line',
+    'sun_levels', 'moisture', 'is_pollinator', 'is_deer_resistant',
+    'piedmont_native', 'flag_for_review', 'reason_for_review', 'source',
+  ];
   const rows = [headers.join(',')];
   for (const p of plants) {
     rows.push([
@@ -436,10 +517,13 @@ function downloadEnrichedCsv() {
       csvEscape(p.common),
       csvEscape(p.attributes_line),
       csvEscape(p.highlight_line),
-      csvEscape(p.sun_level),
+      csvEscape((p.sun_levels || []).join('|')),
       csvEscape(p.moisture),
       csvEscape(p.is_pollinator),
       csvEscape(p.is_deer_resistant),
+      csvEscape(p.piedmont_native || false),
+      csvEscape(p.flag_for_review || false),
+      csvEscape(p.reason_for_review || ''),
       csvEscape(p.source),
     ].join(','));
   }
@@ -459,14 +543,21 @@ function applyEnrichedDataToRow(tr, badge, updatedPlant) {
   const inputs    = tr.querySelectorAll('input[type="text"]');
   const textareas = tr.querySelectorAll('textarea');
   const selects   = tr.querySelectorAll('.icon-fields select');
-  const checks    = tr.querySelectorAll('.icon-fields input[type="checkbox"]');
   if (inputs[0])    inputs[0].value    = updatedPlant.latin           || '';
   if (textareas[0]) textareas[0].value = updatedPlant.attributes_line || '';
   if (textareas[1]) textareas[1].value = updatedPlant.highlight_line  || '';
-  if (selects[0])   selects[0].value   = updatedPlant.sun_level       || '';
-  if (selects[1])   selects[1].value   = updatedPlant.moisture        || '';
-  if (checks[0])    checks[0].checked  = !!updatedPlant.is_pollinator;
-  if (checks[1])    checks[1].checked  = !!updatedPlant.is_deer_resistant;
+  if (selects[0])   selects[0].value   = updatedPlant.moisture        || '';
+
+  // Sun levels via data-sun-value checkboxes
+  const sunLevels = Array.isArray(updatedPlant.sun_levels) ? updatedPlant.sun_levels : [];
+  tr.querySelectorAll('.icon-fields input[data-sun-value]').forEach(cb => {
+    cb.checked = sunLevels.includes(cb.dataset.sunValue);
+  });
+
+  const critterCb = tr.querySelector('.icon-fields input[data-critter-check]');
+  const deerCb    = tr.querySelector('.icon-fields input[data-deer-check]');
+  if (critterCb) critterCb.checked = !!updatedPlant.is_pollinator;
+  if (deerCb)    deerCb.checked    = !!updatedPlant.is_deer_resistant;
 }
 
 // ─── Enrichment UI ────────────────────────────────────────────────────────────
@@ -503,10 +594,11 @@ async function startEnrichment(limit) {
 
     // Update the row in the review table in-place
     const tr = document.querySelector(`tr[data-idx="${plants.indexOf(updatedPlant)}"]`);
-    if (!tr) return;
-
-    const badge = tr.querySelector('.badge');
-    applyEnrichedDataToRow(tr, badge, updatedPlant);
+    if (tr) {
+      const badge = tr.querySelector('.source-badge');
+      applyEnrichedDataToRow(tr, badge, updatedPlant);
+    }
+    renderSummary();
   });
 
   progressWrap.style.display = 'none';

@@ -33,13 +33,23 @@ function syncSettings() {
   if (w > 0) SLIDE_CONFIG.slideW = w;
   if (h > 0) SLIDE_CONFIG.slideH = h;
 
+  const gap = parseFloat(document.getElementById('cfg-cut-gap').value);
+  if (gap >= 0) SLIDE_CONFIG.cutGap = gap;
+
+  const commonSize    = parseFloat(document.getElementById('cfg-font-common').value);
+  const attribSize    = parseFloat(document.getElementById('cfg-font-attrib').value);
+  const highlightSize = parseFloat(document.getElementById('cfg-font-highlight').value);
+  if (commonSize > 0)    SLIDE_CONFIG.fonts.common.size    = commonSize;
+  if (attribSize > 0)    SLIDE_CONFIG.fonts.attribute.size = attribSize;
+  if (highlightSize > 0) SLIDE_CONFIG.fonts.highlight.size = highlightSize;
+
   appSettings.filterVisible = document.getElementById('cfg-filter-visible').checked;
   appSettings.excludedPages = document.getElementById('cfg-excluded-pages').value
     .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 }
 
 // ─── Icon configuration ───────────────────────────────────────────────────────
-// Edit this object to change icon display. Keys must match sun_level / moisture
+// Edit this object to change icon display. Keys must match sun_levels / moisture
 // field values on plant objects. To swap emoji for image assets, replace the
 // string values with pptxgenjs image objects in pptx.js → buildIcons().
 const ICON_CONFIG = {
@@ -53,39 +63,44 @@ const ICON_CONFIG = {
     average: '💧💧  Average',
     drought: '💧     Drought Tolerant',
   },
-  pollinator:     { show: '🦋 Pollinator Friendly' },
-  deer_resistant: { show: '🦌 Deer Resistant' },
+  critter_friendly: { show: '🦋 Critter Friendly' },
+  deer_resistant:   { show: '🦌 Deer Resistant' },
 };
 
 // ─── Slide / layout configuration ────────────────────────────────────────────
 // All dimensions in inches. Change values here; do not edit rendering code.
 const SLIDE_CONFIG = {
-  slideW: 7.75,
-  slideH: 4.75,
+  slideW: 8.5,
+  slideH: 11.0,
 
-  get signH() { return this.slideH; },
+  // Gap between the two signs stacked on a page (cut line whitespace).
+  cutGap: 0.125,
+
+  // Height of one sign = half the page minus half the gap.
+  get signH() { return (this.slideH - this.cutGap) / 2; },
 
   photoColW:      3.0,
   contentMarginX: 0.18,
   contentMarginY: 0.18,
 
   colors: {
-    headerGreen:  '2d5a27',
-    accentGreen:  '4a8c3f',
-    bodyText:     '1a1a1a',
-    highlightText:'3a5f35',
-    photoBg:      'c8d8c4',
-    dividerLine:  '2d5a27',
-    iconBg:       'eaf3e8',
-    signBg:       'FFFFFF',
+    headerGreen:       '2d5a27',
+    accentGreen:       '4a8c3f',
+    bodyText:          '1a1a1a',
+    highlightText:     '3a5f35',
+    photoBg:           'c8d8c4',
+    dividerLine:       '2d5a27',
+    iconBg:            'eaf3e8',
+    signBg:            'FFFFFF',
+    piedmontBadge:     'FFD700',  // bright gold
+    piedmontBadgeText: '2d5a27',  // same dark green as title
   },
 
   fonts: {
-    latin:     { name: 'Georgia',         size: 11,  italic: true,  bold: false },
-    common:    { name: 'Georgia',         size: 19,  italic: false, bold: true  },
-    attribute: { name: 'Calibri',         size: 9,   italic: false, bold: false },
-    highlight: { name: 'Georgia',         size: 9.5, italic: true,  bold: false },
-    icon:      { name: 'Segoe UI Emoji',  size: 9,   italic: false, bold: false },
-    iconLabel: { name: 'Calibri',         size: 8.5, italic: false, bold: false },
+    common:    { name: 'Georgia',        size: 24,  italic: false, bold: true  },
+    attribute: { name: 'Calibri',        size: 18,  italic: false, bold: false },
+    highlight: { name: 'Georgia',        size: 20,  italic: true,  bold: false },
+    icon:      { name: 'Segoe UI Emoji', size: 9,   italic: false, bold: false },
+    iconLabel: { name: 'Calibri',        size: 8.5, italic: false, bold: false },
   },
 };
