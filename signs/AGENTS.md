@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This project builds a **single-file static web app** (`prototype.html`) that generates plant sale signs as a `.pptx` file for a Master Gardener extension fundraiser. The app replaces a manual ChatGPT + Python pipeline with deterministic code and targeted AI calls.
+This project builds a **static web app** (`public/index.html`) that generates plant sale signs as a `.pptx` file for a Master Gardener extension fundraiser. The app replaces a manual ChatGPT + Python pipeline with deterministic code and targeted AI calls.
 
 Working directory: `/Users/erik/repos/plant-sale/signs/`
 
@@ -11,6 +11,50 @@ Working directory: `/Users/erik/repos/plant-sale/signs/`
 ---
 
 ## What's Been Built
+
+### `piedmont_native_classifier/` — local CLI tool for NC Piedmont native classification
+
+Standalone Python tool that checks whether a plant is native to the NC Piedmont by
+fetching its BONAP county distribution map and sampling pixels inside the Piedmont region.
+
+```
+piedmont_native_classifier/
+├── piedmont_check.py       — CLI entry point
+└── bonap_reference_map.png — Andropogon gerardii species map with Piedmont counties
+                              painted in red (used to define the sample region)
+```
+
+**How it works:**
+1. Reads the red-painted blob in `bonap_reference_map.png` to get Piedmont pixel coordinates
+2. Fetches the BONAP species county map for the given latin name (`/MapGallery/County/{Genus} {species}.png`)
+3. Samples all Piedmont pixels on that map, skipping border/background colors
+4. If ≥10% of valid county pixels are dark green, lime green, or golden yellow → **Piedmont native**
+
+**Note on map offsets:** BONAP genus-level maps (`/MapGallery/County/Genus/`) are offset
+23px left and 7px up relative to species-level maps. The reference map is a species-level
+map (Andropogon gerardii) so no offset correction is needed.
+
+**BONAP color key:**
+- `(0, 128, 0)` dark green — bonafide native
+- `(0, 255, 0)` lime green — native (present)
+- `(173, 142, 0)` golden/yellow — adventive or present
+- `(66, 66, 66)` dark gray — not present in this county
+
+**Usage:**
+```bash
+python3 piedmont_native_classifier/piedmont_check.py "Coreopsis verticillata"
+python3 piedmont_native_classifier/piedmont_check.py "Coreopsis verticillata" --show-map
+```
+
+`--show-map` fetches the plant's BONAP map, overlays a red outline of the Piedmont region,
+and opens it in a temp file for visual verification.
+
+**Dependencies:** `pip install pillow numpy`
+
+**Long-term plan:** batch-process `plants.csv` latin names to populate an `is_piedmont_native`
+column, then push that data into Squarespace so it becomes part of the sign source of truth.
+
+---
 
 ### `public/` — the app (static site, open `index.html` directly in a browser)
 
