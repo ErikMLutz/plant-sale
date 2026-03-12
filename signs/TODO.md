@@ -4,6 +4,10 @@
   - bigger text
   - multiple sun icons
   - drop all images stacked on top of each other for human edits
+  - add prominent gold badge/star with "piedmont native" label
+  - add a "review needed" status based on aggregated info from plants.csv and anything we add to compare between
+    squarespace and plants.csv. this should also sort above the `plants.csv` status along with the "ai enriched" and
+    "needs enriching" and "manually edited" statuses
 - piedmont native
    - pull map from bonap https://bonap.net/Napa/TaxonMaps/Genus/County/Andropogon
    - check color of each county in piedmont https://www.birdforum.net/opus/File:Nc_map_w_regions_n_counties.jpg

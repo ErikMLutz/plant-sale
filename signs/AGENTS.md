@@ -12,6 +12,39 @@ Working directory: `/Users/erik/repos/plant-sale/signs/`
 
 ## What's Been Built
 
+### `infosheet_converter/` — batch converter from infosheets to plants.csv
+
+```
+infosheet_converter/
+└── convert.py   — CLI tool; reads all .docx infosheets, writes enriched plants.csv
+```
+
+**Usage:**
+```bash
+python3 infosheet_converter/convert.py [INFOSHEET_DIR] [--output OUTPUT_CSV] [--skip-bonap] [--bonap-workers N]
+```
+
+Defaults: reads `initial_info/email1/2026 plant infosheets/`, writes `~/Downloads/upload/plants.improved.csv`.
+
+**What it does:**
+1. Parses each `.docx` infosheet by segmenting labeled fields (`Height:`, `Bloom time and color:`, `Native range:`, etc.)
+2. Builds an `attributes_line` deterministically from those fields (no AI)
+3. Runs BONAP Piedmont native checks in parallel (default 10 workers) via `piedmont_native_classifier/piedmont_check.py`
+4. Computes `flag_for_review` / `reason_for_review` for: BONAP lookup failures, NC native contradictions between infosheet and BONAP, latin names with parentheticals that may not match Squarespace
+
+**Output columns** (enriched CSV format, loadable by the sign generator app):
+`latin, common, attributes_line, highlight_line, sun_level, moisture, is_pollinator, is_deer_resistant, piedmont_native, flag_for_review, reason_for_review, source`
+
+`source` is always `"infosheet"` for this tool's output.
+
+**Why this exists:** the original `plants.csv` was produced by Ali running AI over the infosheets, which introduced hallucinations (e.g. Amorphophallus konjac marked as "NC native"). This tool extracts data directly from the structured infosheet fields.
+
+**BONAP 404s:** some species are missing from BONAP (non-North American plants, or species BONAP hasn't mapped). These default to `piedmont_native: False` and are flagged for review.
+
+**Dependencies:** `pip install pillow numpy` (for BONAP checks)
+
+---
+
 ### `piedmont_native_classifier/` — local CLI tool for NC Piedmont native classification
 
 Standalone Python tool that checks whether a plant is native to the NC Piedmont by
