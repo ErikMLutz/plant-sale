@@ -1,15 +1,75 @@
 // ─── PPTX slide rendering ─────────────────────────────────────────────────────
 
-/** Parse "Size: X; Bloom: Y; …" into [{label, value}, …] */
-function parseAttributes(line) {
-  return (line || '').split(';').map(part => {
-    const colonIdx = part.indexOf(':');
-    if (colonIdx === -1) return { label: '', value: part.trim() };
-    return {
-      label: part.slice(0, colonIdx).trim(),
-      value: part.slice(colonIdx + 1).trim(),
-    };
-  }).filter(a => a.label || a.value);
+/**
+ * Convert an HTML description string to an array of pptxgenjs run objects.
+ *
+ * Handles:
+ *   <ul>/<li> — bullet runs: "• " (accent green bold) + optional <strong>Label:</strong>
+ *               (bold body text) + value text (plain body text) + breakLine
+ *   <p>       — italic highlight paragraph + breakLine
+ *   6pt spacer run inserted between <ul> block and first <p>
+ *
+ * Uses a temporary DOM element to parse HTML — no external parser needed.
+ */
+function parseHtmlToRuns(html) {
+  const { fonts, colors } = SLIDE_CONFIG;
+  const el = document.createElement('div');
+  el.innerHTML = html || '';
+
+  const runs = [];
+  let hadUl = false;
+
+  for (const node of Array.from(el.childNodes)) {
+    if (node.nodeName === 'UL') {
+      hadUl = true;
+      for (const li of Array.from(node.childNodes)) {
+        if (li.nodeName !== 'LI') continue;
+
+        // Bullet marker
+        runs.push({ text: '• ', options: { fontSize: fonts.attribute.size, color: colors.accentGreen, bold: true, fontFace: fonts.attribute.name } });
+
+        // Walk li child nodes — split <strong>/<b> (bold) from text nodes (plain)
+        const liChildren = Array.from(li.childNodes);
+        const liRuns = [];
+        for (const child of liChildren) {
+          const isBold = child.nodeName === 'STRONG' || child.nodeName === 'B';
+          const t = child.textContent || '';
+          if (!t) continue;
+          liRuns.push({ text: t, options: { fontSize: fonts.attribute.size, bold: isBold, color: colors.bodyText, fontFace: fonts.attribute.name } });
+        }
+
+        if (liRuns.length === 0) {
+          // Fallback: use full text content as plain run
+          const t = li.textContent.trim();
+          if (t) liRuns.push({ text: t, options: { fontSize: fonts.attribute.size, bold: false, color: colors.bodyText, fontFace: fonts.attribute.name } });
+        }
+
+        if (liRuns.length > 0) {
+          // breakLine on the last run of this li
+          const last = liRuns[liRuns.length - 1];
+          liRuns[liRuns.length - 1] = { ...last, options: { ...last.options, breakLine: true } };
+          runs.push(...liRuns);
+        } else {
+          // Empty li — put breakLine on the bullet
+          const bullet = runs[runs.length - 1];
+          runs[runs.length - 1] = { ...bullet, options: { ...bullet.options, breakLine: true } };
+        }
+      }
+    } else if (node.nodeName === 'P') {
+      const t = node.textContent || '';
+      if (!t.trim()) continue;
+      if (hadUl) {
+        runs.push({ text: ' ', options: { fontSize: 6, breakLine: true } });
+        hadUl = false;
+      }
+      runs.push({
+        text: t,
+        options: { fontSize: fonts.highlight.size, fontFace: fonts.highlight.name, italic: true, color: colors.highlightText, breakLine: true },
+      });
+    }
+  }
+
+  return runs;
 }
 
 /**
@@ -118,8 +178,7 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
   const textBoxY   = yOffset + mY;
   const textBoxH   = iconStripY - textBoxY - 0.05;
 
-  // Combined text box: common name + attributes + highlight
-  const attrs = parseAttributes(plant.attributes_line);
+  // Combined text box: common name + description (HTML)
   const combinedRuns = [];
 
   // Common name
@@ -128,26 +187,11 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
     options: { fontSize: fonts.common.size, fontFace: fonts.common.name, bold: true, color: colors.headerGreen, breakLine: true },
   });
 
-  // Spacer between title and attributes
+  // Spacer between title and description
   combinedRuns.push({ text: ' ', options: { fontSize: 6, breakLine: true } });
 
-  // Attribute bullets
-  attrs.forEach(attr => {
-    combinedRuns.push({ text: '• ', options: { fontSize: fonts.attribute.size, color: colors.accentGreen, bold: true, fontFace: fonts.attribute.name } });
-    if (attr.label) {
-      combinedRuns.push({ text: attr.label + ': ', options: { fontSize: fonts.attribute.size, bold: true, color: colors.bodyText, fontFace: fonts.attribute.name } });
-    }
-    combinedRuns.push({ text: attr.value, options: { fontSize: fonts.attribute.size, bold: false, color: colors.bodyText, fontFace: fonts.attribute.name, breakLine: true } });
-  });
-
-  // Spacer between attributes and highlight
-  if (plant.highlight_line) {
-    combinedRuns.push({ text: ' ', options: { fontSize: 8, breakLine: true } });
-    combinedRuns.push({
-      text: plant.highlight_line,
-      options: { fontSize: fonts.highlight.size, fontFace: fonts.highlight.name, italic: true, color: colors.highlightText },
-    });
-  }
+  // Description runs (parsed from HTML)
+  combinedRuns.push(...parseHtmlToRuns(plant.description));
 
   slide.addText(combinedRuns, { x: innerX, y: textBoxY, w: innerW, h: textBoxH, valign: 'top', wrap: true, autoFit: false });
 

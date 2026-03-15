@@ -1,7 +1,8 @@
 // ─── AI Enrichment ────────────────────────────────────────────────────────────
 // Builds direct source URLs for each plant, injects them into the prompt,
-// and calls gpt-4o-search-preview (which has built-in web search) to fetch
-// and extract structured data from NCSU, Prairie Moon, USDA, FSUS, and MBG.
+// and calls gpt-4o (which has built-in web search) to fetch and extract
+// structured data from NCSU, Prairie Moon, USDA, FSUS, and MBG.
+// Merge calls use gpt-4o-mini (no web search needed — text processing only).
 
 /**
  * Fix soft-wrapped JSON (e.g. from terminal output or copy-paste).
@@ -40,16 +41,17 @@ function unwrapJson(text) {
 }
 
 /**
- * Build the prompt for gpt-4o-search-preview.
+ * Build the prompt for gpt-4o with web search.
  * Instructs the model to web search within approved domains only.
- * The model finds the correct pages itself rather than relying on guessed URL slugs.
+ * Returns a JSON object with description (HTML), sun_levels (array),
+ * moisture, is_pollinator, is_deer_resistant, piedmont_native.
  */
 function buildPrompt(plant) {
   const lines = [
     'You are a botanist filling in plant sale sign data. Search the web and return only valid JSON with no markdown or code fences.',
     '',
     `Plant common name: ${plant.common}`,
-    `Squarespace description: ${plant.description || '(none)'}`,
+    `Squarespace description: ${stripHtml(plant.ss_description_html || plant.description || '')}`,
     `Tags: ${plant.tags || '(none)'}`,
     '',
     'Search the web for this plant to find its horticultural data.',
@@ -64,32 +66,32 @@ function buildPrompt(plant) {
     '',
     'Return ONLY this exact JSON object (no markdown, no code fences, no extra text):',
     JSON.stringify({
-      latin: 'genus species [cultivar if applicable] — species name only, no taxonomic author citations',
-      attributes_line: 'Size: H ft tall x W ft wide; Bloom: color, season; Soil: type; Native range: Continent[, NC native]; USDA zone: #-#; Deer Resistance: yes/moderate/no',
-      highlight_line: 'sentence 1: distinctive sensory, structural, or garden trait. sentence 2: ecological or wildlife value.',
-      sun_level: 'full_sun OR part_shade OR shade',
-      moisture: 'wet OR average OR drought',
+      description: '<ul><li><strong>Size:</strong> H ft tall x W ft wide</li><li><strong>Bloom:</strong> color, season</li><li><strong>Soil:</strong> type</li><li><strong>Native range:</strong> Continent[, NC native]</li><li><strong>USDA zone:</strong> #-#</li><li><strong>Deer Resistance:</strong> yes/moderate/no</li></ul><p>Highlight sentence 1. Highlight sentence 2.</p>',
+      sun_levels: ['full_sun'],
+      moisture: 'average',
       is_pollinator: true,
       is_deer_resistant: false,
+      piedmont_native: false,
     }, null, 2),
     '',
     [
       'Rules:',
-      '- latin: genus + species only (e.g. "Actaea racemosa"). Include cultivar name in quotes if the plant is a named cultivar. Never add author citations like "(Pursh) Kuntze".',
-      '- attributes_line: each segment 6 words or fewer. Semicolons between segments, no trailing semicolon.',
-      '- Size: use the full height range × full width range from the source (e.g. "1-3 ft tall x 1-2 ft wide"). Use ft for plants over 1 ft tall/wide; use in for smaller dimensions.',
-      '- Bloom color: color + season ONLY — no form descriptors (e.g. not "clusters", "button-like"). Allowed plain English colors: white, lavender, purple, pink, red, orange, yellow, blue, green. If multiple colors, list the two most prominent separated by "/" (e.g. "white/yellow").',
+      '- description: HTML only. Use <ul><li>...</li></ul> for attribute bullets and <p>...</p> for the highlight paragraph.',
+      '- Each <li> must use <strong>Label:</strong> value format. Each value 6 words or fewer.',
+      '- Size: full height range × full width range (e.g. "1-3 ft tall x 1-2 ft wide"). Use ft for plants over 1 ft; use in for smaller.',
+      '- Bloom color: color + season ONLY — no form descriptors. Allowed colors: white, lavender, purple, pink, red, orange, yellow, blue, green. Two most prominent separated by "/" if multiple (e.g. "white/yellow").',
       '- Bloom season: Spring / early Summer / mid Summer / late Summer / early Fall / Fall. "mid-late Summer" is also valid.',
-      '- Soil: texture/drainage first, then notable tolerance if applicable (e.g. "moist, well-drained"). 6 words or fewer.',
+      '- Soil: texture/drainage first, then notable tolerance if applicable. 6 words or fewer.',
       '- Native range: "North America, NC native" only if botanically native to NC. "North America" if continental but not NC. "Asia", "Europe", etc. Never list US states.',
       '- USDA zone: numeric range only, e.g. "4-8".',
       '- Deer Resistance: exactly "yes", "moderate", or "no".',
-      '- highlight_line: two sentences max. First: a specific sensory, structural, or unusual trait. Second: wildlife value, ecological role, or landscape use. Name host species when known.',
-      '- sun_level: "full_sun" if full sun only; "part_shade" if full sun + part shade listed; "shade" if part shade or shade only.',
+      '- <p> highlight: two sentences max. First: specific sensory, structural, or unusual trait. Second: wildlife value, ecological role, or landscape use. Name host species when known.',
+      '- sun_levels: array — include all that apply: "full_sun", "part_shade", "shade".',
       '- moisture: "wet" = consistently moist or wet; "drought" = drought-tolerant; "average" = typical garden moisture. When in doubt, use "average".',
       '- is_pollinator: true only if documented larval host plant OR primary nectar/pollen source for native bees, butterflies, or hummingbirds.',
       '- is_deer_resistant: true only if Deer Resistance = "yes". "moderate" → false.',
-      '- is_pollinator and is_deer_resistant: must be JSON booleans (true/false), not strings.',
+      '- piedmont_native: true only if botanically native to the NC Piedmont region.',
+      '- sun_levels, is_pollinator, is_deer_resistant, piedmont_native: must be JSON booleans/arrays (not strings).',
     ].join('\n'),
   ];
 
@@ -165,8 +167,10 @@ async function callOpenAI(plant, apiKey) {
 }
 
 /**
- * Enrich a single plant using gpt-4o-search-preview with direct source URLs.
- * Never overwrites non-empty existing fields.
+ * Enrich a single plant using gpt-4o with web search.
+ * Updates description (HTML), sun_levels (array), moisture,
+ * is_pollinator, is_deer_resistant, piedmont_native.
+ * Never overwrites non-empty existing description.
  */
 async function enrichPlant(plant, apiKey) {
   let aiData;
@@ -179,24 +183,23 @@ async function enrichPlant(plant, apiKey) {
 
   const merged = { ...plant };
 
-  const stringFields = ['latin', 'attributes_line', 'highlight_line', 'moisture'];
-  for (const field of stringFields) {
-    if (!merged[field] && aiData[field]) {
-      merged[field] = aiData[field];
-    }
+  // description: use AI result if plant has no non-empty description from CSV
+  if (aiData.description) {
+    merged.description = aiData.description;
   }
 
-  // AI returns sun_level as a string; convert to sun_levels array
-  if ((!merged.sun_levels || merged.sun_levels.length === 0) && aiData.sun_level) {
-    merged.sun_levels = [aiData.sun_level];
+  // sun_levels: AI returns an array
+  if (Array.isArray(aiData.sun_levels) && aiData.sun_levels.length > 0) {
+    merged.sun_levels = aiData.sun_levels;
+  } else if (typeof aiData.sun_levels === 'string' && aiData.sun_levels) {
+    // Handle legacy single-string sun_level just in case
+    merged.sun_levels = [aiData.sun_levels];
   }
 
-  if (!merged.is_pollinator && aiData.is_pollinator === true) {
-    merged.is_pollinator = true;
-  }
-  if (!merged.is_deer_resistant && aiData.is_deer_resistant === true) {
-    merged.is_deer_resistant = true;
-  }
+  if (aiData.moisture) merged.moisture = aiData.moisture;
+  if (aiData.is_pollinator === true)     merged.is_pollinator     = true;
+  if (aiData.is_deer_resistant === true) merged.is_deer_resistant = true;
+  if (typeof aiData.piedmont_native === 'boolean') merged.piedmont_native = aiData.piedmont_native;
 
   merged.enrichError = false;
   merged.source = 'ai_enriched';
@@ -237,5 +240,141 @@ async function enrichAllPending(apiKey, limit, onProgress) {
   const CONCURRENCY = 3;
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, pending.length) }, worker)
+  );
+}
+
+// ─── AI Description Merge ──────────────────────────────────────────────────────
+
+/**
+ * Build the merge prompt for gpt-4o-mini.
+ * Input: plant.ss_description_html (authoritative), plant.tags, plant.category,
+ *        plant.description (suspect CSV description from enrichment).
+ * Instructions: synthesize a reconciled HTML description; remove/fix anything
+ * that contradicts SS data; keep useful enrichment from CSV; use same HTML format.
+ * Returns only raw HTML (no JSON wrapper).
+ */
+function buildMergePrompt(plant) {
+  const lines = [
+    'You are a botanist reconciling plant sale sign descriptions. Return only the final HTML — no JSON, no markdown, no code fences.',
+    '',
+    `Plant common name: ${plant.common}`,
+    `Squarespace tags: ${plant.tags || '(none)'}`,
+    `Squarespace categories: ${plant.category || '(none)'}`,
+    '',
+    '== Squarespace description (authoritative — reflects what is actually sold) ==',
+    plant.ss_description_html || '(none)',
+    '',
+    '== CSV enriched description (may contain useful horticultural data, but may also contradict SS) ==',
+    plant.description || '(none)',
+    '',
+    'Task: Synthesize a single reconciled HTML description.',
+    '- The Squarespace description is the source of truth for what the plant is and what is being sold.',
+    '- Keep useful horticultural enrichment from the CSV description (size, bloom, soil, native range, USDA zone, deer resistance, highlight).',
+    '- Remove or fix anything in the CSV description that contradicts the Squarespace description or tags.',
+    '- Use this exact HTML format:',
+    '  <ul><li><strong>Label:</strong> value</li>...</ul><p>Highlight sentence 1. Highlight sentence 2.</p>',
+    '- Each <li>: <strong>Label:</strong> value. Each value 6 words or fewer.',
+    '- <p> highlight: two sentences max. First: specific sensory, structural, or unusual trait. Second: ecological or landscape use.',
+    '- Return ONLY the HTML. No explanations, no JSON, no markdown.',
+  ];
+  return lines.join('\n');
+}
+
+/**
+ * Call OpenAI chat completions (gpt-4o-mini) for description merge.
+ * No web search needed — this is pure text reconciliation.
+ * Returns raw HTML string.
+ */
+async function callOpenAIMerge(plant, apiKey) {
+  const prompt = buildMergePrompt(plant);
+
+  console.groupCollapsed(`[merge] ▶ ${plant.common} — sending merge prompt`);
+  console.log('prompt:', prompt);
+  console.groupEnd();
+
+  const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+    }),
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`OpenAI error ${resp.status}: ${body}`);
+  }
+
+  const data = await resp.json();
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) throw new Error('Empty response from OpenAI');
+
+  // Strip any markdown code fences the model might add despite instructions
+  const html = content.trim()
+    .replace(/^```(?:html)?\s*/i, '')
+    .replace(/\s*```\s*$/, '')
+    .trim();
+
+  console.log(`[merge] ✓ ${plant.common} — merged HTML:`, html);
+  return html;
+}
+
+/**
+ * Merge description for a single plant using gpt-4o-mini.
+ * Updates plant.description and sets plant.description_merged = true.
+ * Only runs if plant.description_merged !== true.
+ * Mutates plants[idx] in place; returns the updated plant object.
+ */
+async function mergeDescription(plant, apiKey) {
+  if (plant.description_merged === true) return plant;
+
+  let html;
+  try {
+    html = await callOpenAIMerge(plant, apiKey);
+  } catch (err) {
+    console.error('[merge] OpenAI failed for', plant.common, '—', err.message);
+    return { ...plant, mergeError: true };
+  }
+
+  return { ...plant, description: html, description_merged: true, mergeError: false };
+}
+
+/**
+ * Merge up to `limit` plants that are not yet merged and not pending (concurrency 3).
+ * Mutates the global `plants` array in place and calls onProgress after each.
+ */
+async function mergeAllUnmerged(apiKey, limit, onProgress) {
+  // `plants` is a global defined in app.js
+  const toMerge = plants
+    .map((p, i) => ({ plant: p, idx: i }))
+    .filter(({ plant }) => !plant.description_merged && plant.source !== 'pending')
+    .slice(0, limit);
+
+  const total = toMerge.length;
+  if (total === 0) return;
+
+  let completed = 0;
+  let nextJob = 0;
+
+  async function worker() {
+    while (nextJob < toMerge.length) {
+      const { plant, idx } = toMerge[nextJob++];
+      const updated = await mergeDescription(plant, apiKey);
+      plants[idx] = updated;
+      completed++;
+      if (typeof onProgress === 'function') {
+        onProgress(completed, total, updated);
+      }
+    }
+  }
+
+  const CONCURRENCY = 3;
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, toMerge.length) }, worker)
   );
 }

@@ -130,16 +130,31 @@ tr:hover           td { background: #eaf3e8; }
 .badge-ai-enriched       { background: #cce5ff; color: #004085; }
 .badge-manually-enriched { background: #e8d5f5; color: #5a1e82; }
 .badge-review-needed     { background: #fde8e8; color: #7b1c1c; cursor: help; }
+.badge-merged            { background: #e8d5c0; color: #5a3a1e; }
 .review-reason           { font-size: 0.72em; font-family: Calibri, sans-serif; color: #7b1c1c; margin-top: 3px; line-height: 1.3; }
 
 /* ── Source cell — fixed width, all children the same width ── */
-.td-source { width: 130px; }
+.td-source { width: 140px; }
 .td-source .badge    { display: block; box-sizing: border-box; width: 100%; text-align: center; }
 .copy-prompt-btn,
-.row-enrich-btn      { display: block; margin-top: 5px; font-size: 0.72em; padding: 2px 0; box-sizing: border-box; width: 100%; text-align: center; }
+.row-enrich-btn,
+.row-merge-btn       { display: block; margin-top: 5px; font-size: 0.72em; padding: 2px 0; box-sizing: border-box; width: 100%; text-align: center; }
 
-/* ── Icon fields cell ── */
-.icon-fields select     { display: block; width: 100%; margin-bottom: 4px; font-size: 0.8em; font-family: Calibri, sans-serif; padding: 2px 4px; border: 1px solid #ddd; border-radius: 3px; background: #fafaf8; }
+/* ── Description contenteditable cell ── */
+.desc-edit {
+  min-height: 60px; min-width: 240px;
+  font-size: 0.8em; font-family: Calibri, sans-serif;
+  border: 1px solid #ddd; border-radius: 3px;
+  padding: 4px 6px; background: #fafaf8;
+  line-height: 1.4;
+}
+.desc-edit:focus { outline: 1px solid #2d5a27; background: #fff; }
+.desc-edit ul { margin: 0; padding-left: 1.2em; }
+.desc-edit li { margin-bottom: 2px; }
+.desc-edit p  { margin: 4px 0 0; }
+
+/* ── Tags/Categories cell ── */
+.tag-fields { min-width: 130px; }
 .icon-check-row         { display: flex; align-items: center; gap: 4px; font-size: 0.8em; font-family: Calibri, sans-serif; color: #444; margin-bottom: 2px; cursor: pointer; }
 .icon-group-label       { font-size: 0.72em; font-family: Calibri, sans-serif; color: #888; margin-bottom: 1px; margin-top: 4px; }
 

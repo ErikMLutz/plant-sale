@@ -147,11 +147,11 @@
   <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px; display:flex; flex-direction:column; gap:6px;">
     <p style="margin:0;">
       <strong>Squarespace export</strong> — go to <em>Commerce → Products</em>, select all products, and export as CSV or TSV.
-      Paste the file contents or upload it. Only the product name and description columns are used.
+      Paste the file contents or upload it.
     </p>
     <p style="margin:0;">
       <strong>plants.csv</strong> — optional but recommended after your first run.
-      Upload the enriched CSV downloaded from Step 2 to skip re-enriching plants you've already filled in.
+      Upload the <code>plants.improved.*.csv</code> downloaded from Step 3 to skip re-enriching plants you've already filled in.
       Plants are matched by common name; unmatched ones will need enrichment.
     </p>
   </div>
@@ -170,14 +170,14 @@
 
     <div class="upload-area">
       <label class="area-label">plants.csv <span style="color:#999;font-weight:normal">(optional)</span></label>
-      <div class="area-note">CSV or TSV — auto-detected. Pre-fills data for matched plants.</div>
+      <div class="area-note">CSV — auto-detected. Pre-fills descriptions for matched plants.</div>
       <textarea id="plants-textarea" placeholder="Paste CSV or TSV content here…"></textarea>
       <div class="file-row">
         <button class="secondary" onclick="document.getElementById('plants-file').click()">Or upload file…</button>
         <span id="plants-file-name">No file chosen</span>
         <input type="file" id="plants-file" accept=".csv,.txt,.tsv" style="display:none" onchange="handlePlantsFile(this)" />
       </div>
-      <div class="area-hint">If provided, plants matched by name will use existing Latin name, attributes, and highlight text.</div>
+      <div class="area-hint">If provided, plants matched by name will use existing descriptions and piedmont_native flags.</div>
     </div>
 
   </div>
@@ -185,75 +185,103 @@
   <div id="import-status" style="margin-top:10px;font-size:0.85em;color:#555;min-height:1.2em;"></div>
 </div>
 
-<!-- Step 1.5: Enrich -->
+<!-- Step 2: AI Enrichment + Merge -->
 <div class="card" id="enrich-section" style="display:none;">
-  <h2>Step 1.5 — AI Enrichment</h2>
-  <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px; display:flex; flex-direction:column; gap:8px;">
-    <p style="margin:0;">
-      Fills in Latin name, attributes, and highlight text for plants not found in plants.csv.
-      Uses <strong>OpenAI gpt-4o</strong> with live web search. The prompt instructs it to prefer
-      approved sources (NCSU Plant Toolbox, Prairie Moon Nursery, USDA Plants, FSUS, Missouri Botanical Garden)
-      and fall back to botanical training knowledge when those sources don't have the plant.
-    </p>
-    <p style="margin:0;">
-      <strong>Cost:</strong> ~$0.03 per plant (~$6 for a full 200-plant sale).
-      For future years when you're only adding a handful of new plants, expect a few cents total.
-      Use the <em>Enrich 1</em> or <em>Enrich 10</em> buttons to test before running the full batch.
-    </p>
-    <p style="margin:0;">
-      <strong>Saving your work:</strong> After enriching, click <em>Download enriched plants.csv</em> in Step 2.
-      Drop that file back into Step 1 next time and all previously enriched plants will load instantly —
-      no API calls needed for plants already in the CSV.
-    </p>
-    <p style="margin:0;">
-      <strong>The API key is optional</strong> — skip this section and fill in data manually in the review table,
-      or use <em>Copy prompt</em> on any row to run the prompt yourself in ChatGPT or Claude and paste the result back with <em>Fill from clipboard</em>.
-    </p>
+  <h2>Step 2 — AI Enrichment &amp; Description Merge <span style="font-size:0.7em; color:#888; font-weight:normal;">(Optional)</span></h2>
+
+  <!-- Enrich sub-section -->
+  <div style="border-bottom:1px solid #e0e0d8; padding-bottom:18px; margin-bottom:18px;">
+    <div style="font-size:0.9em; font-weight:bold; color:#444; font-family:Calibri,sans-serif; margin-bottom:8px;">
+      AI Enrichment — fills descriptions for plants not in plants.csv
+    </div>
+    <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px; display:flex; flex-direction:column; gap:8px;">
+      <p style="margin:0;">
+        Uses <strong>OpenAI gpt-4o</strong> with live web search. Prefers NCSU Plant Toolbox, Prairie Moon Nursery,
+        USDA Plants, FSUS, and Missouri Botanical Garden. Falls back to botanical training knowledge.
+        <strong>Cost:</strong> ~$0.03 per plant (~$6 for a full 200-plant sale).
+      </p>
+      <p style="margin:0;">
+        <strong>No API key?</strong> Use <em>Copy prompt</em> per row, paste into ChatGPT or Claude, copy the JSON, then click <em>Fill from clipboard</em>.
+        Or edit fields directly in Step 3 — rows become "Manually Enriched."
+      </p>
+    </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:2px;">
+      <button id="enrich-btn-all" class="enrich-btn" onclick="startEnrichment()">Enrich all pending plants</button>
+      <button class="enrich-btn secondary" onclick="startEnrichment(10)">Enrich 10</button>
+      <button class="enrich-btn secondary" onclick="startEnrichment(1)">Enrich 1</button>
+    </div>
+    <div id="enrich-progress-wrap" style="display:none; margin-top:12px;">
+      <div id="enrich-progress-label" style="font-size:0.82em; color:#555; font-family:Calibri,sans-serif; margin-bottom:4px;"></div>
+      <div style="background:#e0e0d8; border-radius:4px; height:10px; overflow:hidden;">
+        <div id="enrich-progress-bar" style="height:100%; width:0%; background:#2d5a27; transition:width 0.2s ease;"></div>
+      </div>
+    </div>
+    <div id="enrich-status" style="margin-top:10px; font-size:0.85em; min-height:1.2em;"></div>
   </div>
-  <div style="background:#fde8e8; border:2px solid #c0392b; border-radius:6px; padding:12px 16px; margin-bottom:14px;">
+
+  <!-- Merge sub-section -->
+  <div>
+    <div style="font-size:0.9em; font-weight:bold; color:#444; font-family:Calibri,sans-serif; margin-bottom:8px;">
+      AI Description Merge — reconciles plants.csv descriptions against Squarespace data
+    </div>
+    <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px; display:flex; flex-direction:column; gap:8px;">
+      <p style="margin:0;">
+        Uses <strong>gpt-4o-mini</strong> (no web search — text processing only, ~$0.001/plant).
+        Compares the CSV-derived description against Squarespace tags and description, removes contradictions,
+        and produces a clean reconciled HTML description. Can also be done per-row in Step 3.
+      </p>
+    </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:2px;">
+      <button id="merge-btn-all" class="merge-btn" onclick="startMerge()">Merge all unmerged</button>
+      <button class="merge-btn secondary" onclick="startMerge(10)">Merge 10</button>
+      <button class="merge-btn secondary" onclick="startMerge(1)">Merge 1</button>
+    </div>
+    <div id="merge-progress-wrap" style="display:none; margin-top:12px;">
+      <div id="merge-progress-label" style="font-size:0.82em; color:#555; font-family:Calibri,sans-serif; margin-bottom:4px;"></div>
+      <div style="background:#e0e0d8; border-radius:4px; height:10px; overflow:hidden;">
+        <div id="merge-progress-bar" style="height:100%; width:0%; background:#7d5a3a; transition:width 0.2s ease;"></div>
+      </div>
+    </div>
+    <div id="merge-status" style="margin-top:10px; font-size:0.85em; min-height:1.2em;"></div>
+  </div>
+
+  <!-- Shared API key input -->
+  <div style="background:#fde8e8; border:2px solid #c0392b; border-radius:6px; padding:12px 16px; margin-top:18px; margin-bottom:14px;">
     <strong style="color:#7b1c1c;">⚠ Security warning:</strong>
     <span style="color:#7b1c1c; font-family:Calibri,sans-serif; font-size:0.88em;">
       Never enter an API key on a website you don't personally own and/or trust — the site owner can steal it and charge API calls to your account.
-      Only use this if you truly trust the site and know it's source/origin.
+      Only use this if you truly trust the site and know its source/origin.
     </span>
   </div>
-  <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap;">
+  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
     <label style="font-size:0.88em; font-family:Calibri,sans-serif; color:#555;">
       OpenAI API key:
     </label>
     <input type="password" id="openai-key" placeholder="sk-..."
-      style="flex:1; min-width:200px; max-width:380px; padding:5px 8px; font-size:0.88em; font-family:Calibri,sans-serif; border:1px solid #ccc; border-radius:4px;" />
+      style="flex:1; min-width:200px; max-width:380px; padding:5px 8px; font-size:0.88em; font-family:Calibri,sans-serif; border:1px solid #ccc; border-radius:4px;"
+      oninput="syncRowEnrichBtns()" />
     <button class="secondary" onclick="saveApiKey()">Save key</button>
     <span id="key-status" style="font-size:0.8em; font-family:Calibri,sans-serif; color:#888;"></span>
   </div>
-  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:2px;">
-    <button id="enrich-btn-all" class="enrich-btn" onclick="startEnrichment()">Enrich all pending plants</button>
-    <button class="enrich-btn secondary" onclick="startEnrichment(10)">Enrich 10 pending</button>
-    <button class="enrich-btn secondary" onclick="startEnrichment(1)">Enrich 1 pending</button>
-  </div>
-  <div id="enrich-progress-wrap" style="display:none; margin-top:12px;">
-    <div id="enrich-progress-label" style="font-size:0.82em; color:#555; font-family:Calibri,sans-serif; margin-bottom:4px;"></div>
-    <div style="background:#e0e0d8; border-radius:4px; height:10px; overflow:hidden;">
-      <div id="enrich-progress-bar" style="height:100%; width:0%; background:#2d5a27; transition:width 0.2s ease;"></div>
-    </div>
-  </div>
-  <div id="enrich-status" style="margin-top:10px; font-size:0.85em; min-height:1.2em;"></div>
 </div>
 
-<!-- Step 2: Review + Generate -->
-<div class="card" id="review-section">
+<!-- Step 3: Review + Generate -->
+<div class="card" id="review-section" style="display:none;">
   <div style="display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:10px;">
-    <h2 style="margin:0 0 14px;">Step 2 — Review &amp; Edit</h2>
-    <button class="secondary" onclick="downloadEnrichedCsv()" style="margin-bottom:14px;">Download enriched plants.csv</button>
+    <h2 style="margin:0 0 14px;">Step 3 — Review &amp; Edit</h2>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+      <button class="secondary" onclick="downloadEnrichedCsv()">Download plants.csv</button>
+      <button class="secondary" onclick="downloadUpdatedSsInventory()">Download updated SS inventory</button>
+    </div>
   </div>
   <p style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px;">
     Plants marked <strong>Needs enrichment</strong> are missing data. Three ways to fill them in:
   </p>
   <ol style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 16px; padding-left:1.4em; line-height:1.7;">
-    <li><strong>Bulk auto-enrich</strong> — enter an OpenAI API key in Step 1.5 and click one of the Enrich buttons to run all (or a batch) of pending plants automatically.</li>
-    <li><strong>Per-row auto-enrich</strong> — once an API key is entered, an <em>Auto-enrich</em> button appears on every row. Use this to re-enrich a single plant or fix a bad result without re-running the whole batch.</li>
-    <li><strong>Copy prompt + AI</strong> — click <em>Copy prompt</em> on any row, paste into ChatGPT or Claude, copy the JSON output, then click <em>Fill from clipboard</em> to apply it. Works without an API key.</li>
-    <li><strong>Manual edit</strong> — type directly into the Latin name, Attributes, Highlight, and icon fields. The row will be marked Manually Enriched.</li>
+    <li><strong>Bulk auto-enrich / merge</strong> — enter an OpenAI API key in Step 2 and click the Enrich or Merge buttons.</li>
+    <li><strong>Per-row auto-enrich / merge</strong> — once an API key is entered, <em>Auto-enrich</em> and <em>Auto-merge</em> buttons appear on every row.</li>
+    <li><strong>Copy prompt + AI</strong> — click <em>Copy prompt</em> on any row, paste into ChatGPT or Claude, copy the JSON output, then click <em>Fill from clipboard</em> to apply it.</li>
+    <li><strong>Manual edit</strong> — type or edit HTML directly in the Description field. The row will be marked Manually Enriched.</li>
   </ol>
   <div id="review-summary" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;"></div>
   <div class="table-scroll">
@@ -262,11 +290,10 @@
         <tr>
           <th>Source</th>
           <th>Common Name</th>
-          <th>Latin Name</th>
           <th>Photo</th>
-          <th>Attributes</th>
-          <th>Highlight</th>
-          <th>Sun / Moisture / Icons</th>
+          <th>Description <span style="font-weight:normal; color:#aaa;">(HTML)</span></th>
+          <th>Tags</th>
+          <th>Categories</th>
         </tr>
       </thead>
       <tbody id="review-tbody"></tbody>

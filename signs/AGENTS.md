@@ -16,10 +16,11 @@ Working directory: `/Users/erik/repos/plant-sale/signs/`
 
 ```
 infosheet_converter/
-└── convert.py   — CLI tool; reads all .docx infosheets, writes enriched plants.csv
+├── convert.py              — CLI tool; reads all .docx infosheets, writes enriched plants.csv
+└── migrate_plants_csv.py   — one-time migration from old format to new SS-first format
 ```
 
-**Usage:**
+**Usage (converter):**
 ```bash
 python3 infosheet_converter/convert.py [INFOSHEET_DIR] [--output OUTPUT_CSV] [--skip-bonap] [--bonap-workers N]
 ```
@@ -32,10 +33,17 @@ Defaults: reads `initial_info/email1/2026 plant infosheets/`, writes `~/Download
 3. Runs BONAP Piedmont native checks in parallel (default 10 workers) via `piedmont_native_classifier/piedmont_check.py`
 4. Computes `flag_for_review` / `reason_for_review` for: BONAP lookup failures, NC native contradictions between infosheet and BONAP, latin names with parentheticals that may not match Squarespace
 
-**Output columns** (enriched CSV format, loadable by the sign generator app):
-`latin, common, attributes_line, highlight_line, sun_level, moisture, is_pollinator, is_deer_resistant, piedmont_native, flag_for_review, reason_for_review, source`
+**Output columns** (new format, loadable by the sign generator app):
+`common, piedmont_native, description, flag_for_review, reason_for_review, description_merged, source`
 
-`source` is always `"infosheet"` for this tool's output.
+`source` is always `"csv"` for this tool's output. `description_merged` starts as `false`.
+
+**Usage (migration):**
+```bash
+python3 infosheet_converter/migrate_plants_csv.py [INPUT_CSV]
+```
+Defaults: reads `~/Downloads/upload/plants.improved.csv`, writes `~/Downloads/upload/plants.improved.<YYYYMMDD_HHMMSS>.csv`.
+Converts old `attributes_line` + `highlight_line` → HTML `description` column. Drops `latin`, `sun_levels`, `moisture`, `is_pollinator`, `is_deer_resistant`.
 
 **Why this exists:** the original `plants.csv` was produced by Ali running AI over the infosheets, which introduced hallucinations (e.g. Amorphophallus konjac marked as "NC native"). This tool extracts data directly from the structured infosheet fields.
 
@@ -111,15 +119,20 @@ Scripts load in dependency order via plain `<script>` tags at bottom of `<body>`
 
 **Step 1 — Import**
 - Paste or upload the **Squarespace product export** (TSV or CSV, auto-detected)
-- Optionally paste or upload **`plants.csv`** (legacy enrichment data from Ali's prior work)
+- Optionally paste or upload **`plants.csv`** (`plants.improved.*.csv` from a prior run)
 - Click Import → parses both, matches plants by name, shows summary
+- Squarespace is the single source of truth for tags/categories/photos; plants.csv supplies description + piedmont_native
 
-**Step 2 — Review table**
+**Step 2 — AI Enrichment & Description Merge (optional)**
+- **Enrich**: fills `description` (HTML) for pending plants via gpt-4o with web search (~$0.03/plant)
+- **Merge**: reconciles CSV-derived descriptions against SS data via gpt-4o-mini (~$0.001/plant)
+- Both can be done per-row in Step 3 with Auto-enrich / Auto-merge buttons
+
+**Step 3 — Review & Edit**
 - Editable table, paginated (10 per page), sorted by: Needs enrichment → AI Enriched → Manually Enriched → plants.csv
-- Columns: Source badge, Common Name, Latin Name (editable), Photo thumbnail, Attributes (editable textarea), Highlight (editable textarea), Sun / Moisture / Icons (selects + checkboxes)
-- Source badge reflects enrichment state; editing any field on a non-pending row promotes it to "Manually Enriched"
-- Pending rows show "Copy prompt" and "Fill from clipboard" buttons for manual AI enrichment workflow
-- "Download enriched plants.csv" button exports all plant data including source column
+- Columns: Source badge, Common Name, Photo, Description (contenteditable HTML), Tags (checkboxes), Categories (checkboxes)
+- "Download plants.csv" exports `plants.improved.<datetime>.csv`
+- "Download updated SS inventory" exports the original SS export TSV with updated Description/Tags/Categories
 - "Generate PPTX (N plants)" button → downloads `.pptx`
 
 #### Key data structures
@@ -127,32 +140,34 @@ Scripts load in dependency order via plain `<script>` tags at bottom of `<body>`
 **Plant object** (app state array `plants[]`):
 ```js
 {
-  common: '',           // from Squarespace Title
-  description: '',      // HTML-stripped Squarespace description
-  category: '',         // Squarespace Categories field
-  tags: '',             // Squarespace Tags field
-  photo_urls: [],       // array of CDN URLs from Squarespace
-  latin: '',            // from plants.csv match or AI enrichment
-  attributes_line: '',  // "Size: …; Bloom: …; Soil: …; Native range: …; USDA zone: …; Deer Resistance: …"
-  highlight_line: '',   // 1–2 editorial sentences
-  sun_level: '',        // 'full_sun' | 'part_shade' | 'shade'
-  moisture: '',         // 'wet' | 'average' | 'drought'
-  is_pollinator: false,
-  is_deer_resistant: false,
-  source: 'csv' | 'pending' | 'ai_enriched' | 'manually_enriched',
+  // From Squarespace (authoritative)
+  common, category, tags, photo_urls,
+  // Description — HTML; starts as plants.csv description (or SS description if no CSV match)
+  description,
+  // Original SS description HTML — preserved for merge prompt input only
+  ss_description_html,
+  // From plants.csv
+  piedmont_native, flag_for_review, reason_for_review, description_merged,
+  // Derived from SS tags (authoritative)
+  sun_levels, moisture, is_pollinator, is_deer_resistant,
+  // Enrichment provenance
+  source: 'pending' | 'csv' | 'ai_enriched' | 'manually_enriched',
 }
 ```
 
 #### Squarespace export format
 - Tab-separated, first row headers
-- 714 unique products (deduplicated by non-empty Title — variant rows have empty Title and are skipped)
+- ~714 unique products (deduplicated by non-empty Title — variant rows have empty Title)
 - Key columns: `Title`, `Description` (HTML), `Categories`, `Tags`, `Hosted Image URLs` (space-separated)
 - Photos are publicly accessible Squarespace CDN URLs, served as **WebP** — must be converted to JPEG before embedding in PPTX
+- Raw rows stored in global `rawSsRows` for the "Download updated SS inventory" function
+- All unique tag/category values collected into globals `allSsTags`, `allSsCategories` for checkbox rendering
 
 #### `plants.csv` format
-- Two supported formats (auto-detected by presence of `sun_level` column):
-  - **Original**: `latin, common, attributes_line, highlight_line, page, categories, photo_file` — icon flags derived from `categories` tags like `/sun, /part-shade, /pollinator, /deer, /drought`
-  - **Enriched** (output of "Download enriched plants.csv"): `latin, common, attributes_line, highlight_line, sun_level, moisture, is_pollinator, is_deer_resistant, source` — direct columns, preserves `ai_enriched` / `manually_enriched` source values on re-upload
+- **New format** (output of "Download plants.csv"): `common, piedmont_native, description, flag_for_review, reason_for_review, description_merged, source`
+  - `description` is HTML: `<ul><li><strong>Label:</strong> value</li>...</ul><p>Highlight.</p>`
+  - `description_merged` is `true` after AI merge reconciliation
+- **Old format** (backward compat — auto-detected by presence of `attributes_line`): `common, attributes_line, highlight_line, ...` — auto-converted to HTML description on load
 - Matched to Squarespace by normalized common name (lowercase, alphanumeric only)
 
 ---
@@ -168,9 +183,9 @@ Scripts load in dependency order via plain `<script>` tags at bottom of `<body>`
 | Function | What it does |
 |---|---|
 | `addSignToSlide(slide, plant, yOffset, photoData)` | Renders one plant sign onto a slide |
+| `parseHtmlToRuns(html)` | Converts HTML description to pptxgenjs run objects (`<ul>/<li>` → bullets, `<p>` → italic paragraph) |
 | `estimateWrappedLines(text, widthInches, fontSpec)` | Canvas-based word-wrap line counter (accurate for variable-width fonts) |
 | `fetchForPptx(url)` | Fetches CDN image, detects format via magic bytes, converts WebP/GIF → JPEG via Canvas with centered cover crop, returns `"image/jpeg;base64,..."` (no `data:` prefix — pptxgenjs format) |
-| `parseAttributes(line)` | Splits semicolon-delimited attributes string into `{label, value}` pairs |
 | `buildIcons(plant)` | Returns icon strip text array from `ICON_CONFIG` |
 | `convertToJpeg(dataUri, targetAspect)` | Canvas cover-crop + WebP→JPEG conversion |
 
@@ -203,42 +218,34 @@ Adding a new toggle: add a checkbox to the `#debug-panel` HTML, read it in `sync
 
 ---
 
-## AI Enrichment (Step 1.5)
+## AI Enrichment & Merge (Step 2)
 
-Built in `js/enrich.js`. Fills `pending` plants via OpenAI gpt-4o-mini.
+Built in `js/enrich.js`.
 
 **Three enrichment paths available to users:**
-1. **Auto-enrich** — enter OpenAI API key in Step 1.5, click Enrich; processes all pending plants at concurrency 3
-2. **Copy prompt + AI** — click "Copy prompt" on a pending row, paste into any AI (Claude/ChatGPT), click "Fill from clipboard" to apply the JSON response
-3. **Manual edit** — type directly into table fields; row becomes "Manually Enriched"
+1. **Auto-enrich** — enter OpenAI API key in Step 2, click Enrich; processes all pending plants at concurrency 3 using gpt-4o with web search
+2. **Copy prompt + AI** — click "Copy prompt" on a pending row, paste into any AI (Claude/ChatGPT), copy the JSON output, click "Fill from clipboard" to apply
+3. **Manual edit** — type/edit HTML directly in the Description field; row becomes "Manually Enriched"
 
-**`buildPrompt(plant, context)`** in `enrich.js` — builds the prompt sent to OpenAI (or copied for manual use). When called with empty context string, produces a self-contained prompt suitable for pasting into any AI.
+**`buildPrompt(plant)`** — builds the enrichment prompt. Returns JSON with `description` (HTML), `sun_levels` (array), `moisture`, `is_pollinator`, `is_deer_resistant`, `piedmont_native`.
 
-**JSON output shape** (from AI, applied via `enrichPlant` or "Fill from clipboard"):
+**JSON output shape** (from AI enrichment):
 ```json
 {
-  "latin": "Actaea racemosa",
-  "attributes_line": "Size: 7 ft tall x 2-3 ft wide; Bloom: white, mid-late Summer; Soil: Rich woodland, Medium-Wet; Native range: North America, NC native; USDA zone: 4-8; Deer Resistance: yes",
-  "highlight_line": "Tall, wand-like spires of fragrant white flowers rise above bold woodland foliage in late summer.",
-  "sun_level": "shade",
+  "description": "<ul><li><strong>Size:</strong> 7 ft tall x 2-3 ft wide</li>...</ul><p>Highlight.</p>",
+  "sun_levels": ["shade"],
   "moisture": "wet",
   "is_pollinator": true,
-  "is_deer_resistant": true
+  "is_deer_resistant": true,
+  "piedmont_native": true
 }
 ```
 
-**Attributes format** (strict — AI must follow this):
-`Size: X ft tall x Y ft wide; Bloom: color, Season; Soil: type; Native range: Continent, NC native; USDA zone: #-#; Deer Resistance: yes/moderate/no`
-Each value ≤6 words. See `initial_info/email2/plant_spreadsheet_master_rulebook.txt` for the full rulebook.
-
-**Fill from clipboard JSON parsing:** strips markdown code fences, collapses `\n\s+` (Claude/ChatGPT wrap long string values across lines, producing invalid JSON).
-
-**Web scraping** (`fetchAllSources` in `enrich.js`): attempts USDA JSON API + NCSU/Prairie Moon/FSUS/MBG HTML scraping before the AI call. CORS failures are logged and skipped. In practice only NCSU HTML tends to succeed; the others 404 or block browser requests.
-
-## What's Next
-
-- **Enrichment data sources** (TODO item 1): web scraping is unreliable. USDA API returns empty results for most plants; Prairie Moon / FSUS / MBG return 404. The copy-prompt workflow is the current practical alternative.
-- The copy prompt does not include scraped web data (blocked by the data source issue above).
+**Description merge** — `buildMergePrompt(plant)` / `mergeDescription(plant, apiKey)` / `mergeAllUnmerged()`:
+- Uses gpt-4o-mini (no web search, ~$0.001/plant)
+- Input: `plant.ss_description_html` (truth), `plant.tags`, `plant.category`, `plant.description` (CSV)
+- Output: reconciled HTML description; sets `plant.description_merged = true`
+- Skips plants already merged (`description_merged === true`) and pending plants (nothing to merge with)
 
 ---
 

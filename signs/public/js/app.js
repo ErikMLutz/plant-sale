@@ -5,7 +5,7 @@ let plants = [];
 
 function syncRowEnrichBtns() {
   const key = document.getElementById('openai-key')?.value.trim() || '';
-  document.querySelectorAll('.row-enrich-btn').forEach(b => { b.disabled = !key; });
+  document.querySelectorAll('.row-enrich-btn, .row-merge-btn').forEach(b => { b.disabled = !key; });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -88,7 +88,6 @@ function runImport() {
     }
 
     plants = parseSquarespaceRows(filteredRows, csvMap);
-    if (csvMap.size > 0) plants.forEach(checkCsvVsSquarespaceContradictions);
 
     // Apply debug plant limit
     if (DEBUG && debugState.limitEnabled && plants.length > debugState.limitValue) {
@@ -110,6 +109,7 @@ function runImport() {
     }
 
     const csvCount    = plants.filter(p => p.source === 'csv').length;
+    const mergedCount = plants.filter(p => p.description_merged).length;
     const reviewCount = plants.filter(p => p.flag_for_review).length;
     statusEl.style.color = '#2d5a27';
     statusEl.textContent =
@@ -117,18 +117,26 @@ function runImport() {
       (csvMap.size > 0
         ? `${csvCount} matched from plants.csv, ${plants.length - csvCount} need enrichment.`
         : 'No plants.csv provided — all plants need enrichment.') +
+      (mergedCount > 0 ? ` ${mergedCount} descriptions merged.` : '') +
       (reviewCount > 0 ? ` ${reviewCount} flagged for review.` : '');
 
     buildReviewTable();
 
     const pendingCount = plants.filter(p => p.source === 'pending').length;
     const enrichSection = document.getElementById('enrich-section');
-    if (pendingCount > 0) {
+    if (pendingCount > 0 || csvCount > 0) {
       enrichSection.style.display = 'block';
       document.getElementById('enrich-btn-all').textContent = `Enrich all (${pendingCount}) pending plants`;
       document.getElementById('enrich-status').textContent = '';
       document.getElementById('enrich-progress-wrap').style.display = 'none';
       document.getElementById('enrich-progress-bar').style.width = '0%';
+
+      // Update merge button counts
+      const unmergedCount = plants.filter(p => !p.description_merged && p.source !== 'pending').length;
+      document.getElementById('merge-btn-all').textContent = `Merge all (${unmergedCount}) unmerged`;
+      document.getElementById('merge-status').textContent = '';
+      document.getElementById('merge-progress-wrap').style.display = 'none';
+      document.getElementById('merge-progress-bar').style.width = '0%';
     } else {
       enrichSection.style.display = 'none';
     }
@@ -191,6 +199,7 @@ function renderSummary() {
   const csv      = plants.filter(p => p.source === 'csv').length;
   const ai       = plants.filter(p => p.source === 'ai_enriched').length;
   const manual   = plants.filter(p => p.source === 'manually_enriched').length;
+  const merged   = plants.filter(p => p.description_merged).length;
 
   const chips = [
     { show: review,  cls: 'badge-review-needed',     label: `🔴 ${review} review needed` },
@@ -198,6 +207,7 @@ function renderSummary() {
     { show: csv,     cls: 'badge-csv',                label: `🟢 ${csv} from plants.csv` },
     { show: ai,      cls: 'badge-ai-enriched',        label: `🔵 ${ai} AI enriched` },
     { show: manual,  cls: 'badge-manually-enriched',  label: `🟣 ${manual} manually enriched` },
+    { show: merged,  cls: 'badge-merged',             label: `🟤 ${merged} desc merged` },
   ];
 
   el.innerHTML = chips
@@ -228,11 +238,6 @@ function renderPage() {
     const tr = document.createElement('tr');
     tr.dataset.idx = idx;
 
-    // Pre-declare refs for fill-from-clipboard handler
-    let latinInput, attribArea, highlightArea, moistureSelect, pollinatorCheck, deerCheck;
-    // Sun is now multi-select checkboxes; track by value key
-    const sunChecks = {};
-
     // ── Source badge + action buttons ──────────────────────────────────────────
     const tdSource = document.createElement('td');
     tdSource.className = 'td-source';
@@ -259,6 +264,13 @@ function renderPage() {
     applyBadge(badge, plant.source);
     tdSource.appendChild(badge);
 
+    // description_merged badge
+    const mergedBadge = document.createElement('span');
+    mergedBadge.className   = 'badge badge-merged desc-merged-badge';
+    mergedBadge.textContent = '🟤 Desc merged';
+    mergedBadge.style.display = plant.description_merged ? '' : 'none';
+    tdSource.appendChild(mergedBadge);
+
     const rowEnrichBtn = document.createElement('button');
     rowEnrichBtn.className   = 'secondary row-enrich-btn';
     rowEnrichBtn.textContent = 'Auto-enrich';
@@ -283,6 +295,33 @@ function renderPage() {
       }, 2000);
     });
     tdSource.appendChild(rowEnrichBtn);
+
+    // Auto-merge button
+    const rowMergeBtn = document.createElement('button');
+    rowMergeBtn.className   = 'secondary row-merge-btn';
+    rowMergeBtn.textContent = 'Auto-merge';
+    rowMergeBtn.disabled    = !(document.getElementById('openai-key')?.value.trim());
+    rowMergeBtn.addEventListener('click', async () => {
+      const apiKey = document.getElementById('openai-key').value.trim();
+      if (!apiKey) return;
+      rowMergeBtn.disabled = true;
+      rowMergeBtn.textContent = 'Merging…';
+      const updated = await mergeDescription(plants[idx], apiKey);
+      plants[idx] = updated;
+      if (!updated.mergeError) {
+        // Update the description div
+        const descDiv = tr.querySelector('.desc-edit');
+        if (descDiv) descDiv.innerHTML = updated.description || '';
+        mergedBadge.style.display = '';
+        renderSummary();
+      }
+      rowMergeBtn.textContent = updated.mergeError ? 'Failed' : 'Done';
+      setTimeout(() => {
+        rowMergeBtn.textContent = 'Auto-merge';
+        rowMergeBtn.disabled = !(document.getElementById('openai-key')?.value.trim());
+      }, 2000);
+    });
+    tdSource.appendChild(rowMergeBtn);
 
     const copyBtn = document.createElement('button');
     copyBtn.className   = 'secondary copy-prompt-btn';
@@ -312,37 +351,38 @@ function renderPage() {
         return;
       }
 
-      text = unwrapJson(
-        text.trim()
-          .replace(/^```(?:json)?\s*/i, '')
-          .replace(/\s*```\s*$/, '')
-          .trim()
-      );
+      text = text.trim()
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```\s*$/, '')
+        .trim();
 
       let data;
-      try { data = JSON.parse(text); }
-      catch (e) {
+      try {
+        data = JSON.parse(unwrapJson(text));
+      } catch (e) {
         fillBtn.textContent = 'Invalid JSON';
         setTimeout(() => { fillBtn.textContent = 'Fill from clipboard'; }, 2000);
         return;
       }
 
-      if (data.latin)           { plants[idx].latin           = data.latin;           latinInput.value     = data.latin; }
-      if (data.attributes_line) { plants[idx].attributes_line = data.attributes_line; attribArea.value     = data.attributes_line; }
-      if (data.highlight_line)  { plants[idx].highlight_line  = data.highlight_line;  highlightArea.value  = data.highlight_line; }
+      if (data.description) {
+        plants[idx].description = data.description;
+        const descDiv = tr.querySelector('.desc-edit');
+        if (descDiv) descDiv.innerHTML = data.description;
+      }
 
-      // Accept sun_levels (array) or sun_level (string, from AI output)
+      // Accept sun_levels (array) or sun_level (string, from legacy AI output)
       const sunFromData = Array.isArray(data.sun_levels)
         ? data.sun_levels
         : (data.sun_level ? [data.sun_level] : null);
       if (sunFromData) {
         plants[idx].sun_levels = sunFromData;
-        Object.entries(sunChecks).forEach(([v, cb]) => { cb.checked = sunFromData.includes(v); });
       }
 
-      if (data.moisture) { plants[idx].moisture = data.moisture; moistureSelect.value = data.moisture; }
-      if (typeof data.is_pollinator     === 'boolean') { plants[idx].is_pollinator     = data.is_pollinator;     pollinatorCheck.checked = data.is_pollinator; }
-      if (typeof data.is_deer_resistant === 'boolean') { plants[idx].is_deer_resistant = data.is_deer_resistant; deerCheck.checked       = data.is_deer_resistant; }
+      if (data.moisture) plants[idx].moisture = data.moisture;
+      if (typeof data.is_pollinator     === 'boolean') plants[idx].is_pollinator     = data.is_pollinator;
+      if (typeof data.is_deer_resistant === 'boolean') plants[idx].is_deer_resistant = data.is_deer_resistant;
+      if (typeof data.piedmont_native   === 'boolean') plants[idx].piedmont_native   = data.piedmont_native;
 
       plants[idx].source = 'ai_enriched';
       applyBadge(badge, 'ai_enriched');
@@ -357,17 +397,6 @@ function renderPage() {
     tdCommon.style.minWidth = '120px';
     tdCommon.textContent    = plant.common;
     tr.appendChild(tdCommon);
-
-    // ── Latin name ──────────────────────────────────────────────────────────────
-    const tdLatin = document.createElement('td');
-    tdLatin.style.minWidth = '140px';
-    latinInput = document.createElement('input');
-    latinInput.type        = 'text';
-    latinInput.value       = plant.latin;
-    latinInput.placeholder = 'Latin name…';
-    latinInput.addEventListener('input', () => { plants[idx].latin = latinInput.value; markManuallyEnriched(idx, tr); });
-    tdLatin.appendChild(latinInput);
-    tr.appendChild(tdLatin);
 
     // ── Photo thumbnail ─────────────────────────────────────────────────────────
     const tdPhoto = document.createElement('td');
@@ -384,78 +413,95 @@ function renderPage() {
     }
     tr.appendChild(tdPhoto);
 
-    // ── Attributes ──────────────────────────────────────────────────────────────
-    const tdAttribs = document.createElement('td');
-    tdAttribs.style.minWidth = '200px';
-    attribArea = document.createElement('textarea');
-    attribArea.value       = plant.attributes_line;
-    attribArea.placeholder = 'Size: …; Bloom: …; Soil: …';
-    attribArea.addEventListener('input', () => { plants[idx].attributes_line = attribArea.value; markManuallyEnriched(idx, tr); });
-    tdAttribs.appendChild(attribArea);
-    tr.appendChild(tdAttribs);
+    // ── Description (HTML, contenteditable) ────────────────────────────────────
+    const tdDesc = document.createElement('td');
+    tdDesc.style.minWidth = '260px';
+    const descDiv = document.createElement('div');
+    descDiv.className     = 'desc-edit';
+    descDiv.contentEditable = 'true';
+    descDiv.innerHTML     = plant.description || '';
+    descDiv.addEventListener('input', () => {
+      plants[idx].description = descDiv.innerHTML;
+      markManuallyEnriched(idx, tr);
+    });
+    tdDesc.appendChild(descDiv);
+    const descHint = document.createElement('div');
+    descHint.className   = 'area-hint';
+    descHint.textContent = '(HTML)';
+    tdDesc.appendChild(descHint);
+    tr.appendChild(tdDesc);
 
-    // ── Highlight ───────────────────────────────────────────────────────────────
-    const tdHighlight = document.createElement('td');
-    tdHighlight.style.minWidth = '200px';
-    highlightArea = document.createElement('textarea');
-    highlightArea.value       = plant.highlight_line;
-    highlightArea.placeholder = 'Editorial highlight text…';
-    highlightArea.addEventListener('input', () => { plants[idx].highlight_line = highlightArea.value; markManuallyEnriched(idx, tr); });
-    tdHighlight.appendChild(highlightArea);
-    tr.appendChild(tdHighlight);
+    // ── Tags checkboxes ─────────────────────────────────────────────────────────
+    const tdTags = document.createElement('td');
+    tdTags.style.minWidth = '140px';
+    tdTags.className = 'tag-fields';
 
-    // ── Icon fields: sun (multi), moisture, critter, deer ──────────────────────
-    const tdIcons = document.createElement('td');
-    tdIcons.style.minWidth = '140px';
-    tdIcons.className = 'icon-fields';
+    const tagsLabel = document.createElement('div');
+    tagsLabel.className   = 'icon-group-label';
+    tagsLabel.textContent = 'Tags:';
+    tdTags.appendChild(tagsLabel);
 
-    const makeCheckRow = (label, checked, onChange, dataAttrs) => {
+    const currentTags = new Set(
+      (plant.tags || '').split(',').map(t => t.trim()).filter(Boolean)
+    );
+
+    Array.from(allSsTags).sort().forEach(tagVal => {
       const row = document.createElement('label');
       row.className = 'icon-check-row';
       const cb = document.createElement('input');
-      cb.type = 'checkbox'; cb.checked = checked;
-      if (dataAttrs) Object.entries(dataAttrs).forEach(([k, v]) => cb.dataset[k] = v);
-      cb.addEventListener('change', () => { onChange(cb.checked); markManuallyEnriched(idx, tr); });
+      cb.type    = 'checkbox';
+      cb.checked = currentTags.has(tagVal);
+      cb.addEventListener('change', () => {
+        const tagSet = new Set(
+          (plants[idx].tags || '').split(',').map(t => t.trim()).filter(Boolean)
+        );
+        if (cb.checked) tagSet.add(tagVal);
+        else            tagSet.delete(tagVal);
+        plants[idx].tags = Array.from(tagSet).join(', ');
+        markManuallyEnriched(idx, tr);
+      });
       row.appendChild(cb);
-      row.append(' ' + label);
-      return { row, cb };
-    };
-
-    // Sun — multi-select checkboxes
-    const sunLabel = document.createElement('div');
-    sunLabel.className   = 'icon-group-label';
-    sunLabel.textContent = 'Sun:';
-    tdIcons.appendChild(sunLabel);
-
-    [['full_sun', 'Full sun'], ['part_shade', 'Part shade'], ['shade', 'Shade']].forEach(([v, l]) => {
-      const { row, cb } = makeCheckRow(l, (plant.sun_levels || []).includes(v), checked => {
-        if (checked) {
-          if (!plants[idx].sun_levels) plants[idx].sun_levels = [];
-          if (!plants[idx].sun_levels.includes(v)) plants[idx].sun_levels.push(v);
-        } else {
-          plants[idx].sun_levels = (plants[idx].sun_levels || []).filter(s => s !== v);
-        }
-      }, { sunValue: v });
-      sunChecks[v] = cb;
-      tdIcons.appendChild(row);
+      row.append(' ' + tagVal);
+      tdTags.appendChild(row);
     });
 
-    moistureSelect = document.createElement('select');
-    [['', '— moisture —'], ['wet', 'Wet'], ['average', 'Average'], ['drought', 'Drought']].forEach(([v, l]) => {
-      const o = document.createElement('option'); o.value = v; o.textContent = l; moistureSelect.appendChild(o);
+    tr.appendChild(tdTags);
+
+    // ── Categories checkboxes ───────────────────────────────────────────────────
+    const tdCats = document.createElement('td');
+    tdCats.style.minWidth = '140px';
+    tdCats.className = 'tag-fields';
+
+    const catsLabel = document.createElement('div');
+    catsLabel.className   = 'icon-group-label';
+    catsLabel.textContent = 'Categories:';
+    tdCats.appendChild(catsLabel);
+
+    const currentCats = new Set(
+      (plant.category || '').split(',').map(c => c.trim()).filter(Boolean)
+    );
+
+    Array.from(allSsCategories).sort().forEach(catVal => {
+      const row = document.createElement('label');
+      row.className = 'icon-check-row';
+      const cb = document.createElement('input');
+      cb.type    = 'checkbox';
+      cb.checked = currentCats.has(catVal);
+      cb.addEventListener('change', () => {
+        const catSet = new Set(
+          (plants[idx].category || '').split(',').map(c => c.trim()).filter(Boolean)
+        );
+        if (cb.checked) catSet.add(catVal);
+        else            catSet.delete(catVal);
+        plants[idx].category = Array.from(catSet).join(', ');
+        markManuallyEnriched(idx, tr);
+      });
+      row.appendChild(cb);
+      row.append(' ' + catVal);
+      tdCats.appendChild(row);
     });
-    moistureSelect.value = plant.moisture || '';
-    moistureSelect.addEventListener('change', () => { plants[idx].moisture = moistureSelect.value; markManuallyEnriched(idx, tr); });
-    tdIcons.appendChild(moistureSelect);
 
-    const { row: critterRow, cb: _critterCheck } = makeCheckRow('Critter friendly', plant.is_pollinator, v => { plants[idx].is_pollinator = v; }, { critterCheck: '1' });
-    pollinatorCheck = _critterCheck;
-    const { row: deerRow, cb: _deerCheck } = makeCheckRow('Deer resistant', plant.is_deer_resistant, v => { plants[idx].is_deer_resistant = v; }, { deerCheck: '1' });
-    deerCheck = _deerCheck;
-
-    tdIcons.appendChild(critterRow);
-    tdIcons.appendChild(deerRow);
-    tr.appendChild(tdIcons);
+    tr.appendChild(tdCats);
 
     tbody.appendChild(tr);
   });
@@ -500,38 +546,118 @@ function downloadEnrichedCsv() {
 
   function csvEscape(val) {
     const s = String(val ?? '').replace(/\r\n/g, ' ').replace(/[\r\n]/g, ' ');
-    return (s.includes(',') || s.includes('"'))
+    return (s.includes(',') || s.includes('"') || s.includes('\n'))
       ? '"' + s.replace(/"/g, '""') + '"'
       : s;
   }
 
   const headers = [
-    'latin', 'common', 'attributes_line', 'highlight_line',
-    'sun_levels', 'moisture', 'is_pollinator', 'is_deer_resistant',
-    'piedmont_native', 'flag_for_review', 'reason_for_review', 'source',
+    'common', 'piedmont_native', 'description',
+    'flag_for_review', 'reason_for_review', 'description_merged', 'source',
   ];
   const rows = [headers.join(',')];
   for (const p of plants) {
     rows.push([
-      csvEscape(p.latin),
       csvEscape(p.common),
-      csvEscape(p.attributes_line),
-      csvEscape(p.highlight_line),
-      csvEscape((p.sun_levels || []).join('|')),
-      csvEscape(p.moisture),
-      csvEscape(p.is_pollinator),
-      csvEscape(p.is_deer_resistant),
       csvEscape(p.piedmont_native || false),
+      csvEscape(p.description || ''),
       csvEscape(p.flag_for_review || false),
       csvEscape(p.reason_for_review || ''),
+      csvEscape(p.description_merged || false),
       csvEscape(p.source),
     ].join(','));
   }
 
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const datetime = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+
   const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'plants.enriched.csv';
+  a.download = `plants.improved.${datetime}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ─── Download updated Squarespace inventory ───────────────────────────────────
+
+function downloadUpdatedSsInventory() {
+  if (!rawSsRows || rawSsRows.length === 0) {
+    alert('No Squarespace data loaded — import first.');
+    return;
+  }
+
+  // Build a lookup from normalized title → plant
+  const plantByTitle = new Map();
+  for (const p of plants) {
+    plantByTitle.set(normalizeName(p.common), p);
+  }
+
+  // Collect all headers from the raw rows
+  const allHeaders = rawSsRows.length > 0 ? Object.keys(rawSsRows[0]) : [];
+
+  // Helper: rebuild tags string with /piedmont-native appended if needed
+  function buildTags(plant, originalTags) {
+    const tagParts = (plant.tags || originalTags || '').split(',').map(t => t.trim()).filter(Boolean);
+    if (plant.piedmont_native && !tagParts.some(t => t.toLowerCase().includes('piedmont-native'))) {
+      tagParts.push('/piedmont-native');
+    }
+    return tagParts.join(', ');
+  }
+
+  // Helper: rebuild categories string with Piedmont Native appended if needed
+  function buildCategories(plant, originalCats) {
+    const catParts = (plant.category || originalCats || '').split(',').map(c => c.trim()).filter(Boolean);
+    if (plant.piedmont_native && !catParts.some(c => c.toLowerCase().includes('piedmont native'))) {
+      catParts.push('Piedmont Native');
+    }
+    return catParts.join(', ');
+  }
+
+  // Track last seen primary plant for variant row tag/category inheritance
+  let lastPlant = null;
+
+  const outputRows = rawSsRows.map(row => {
+    const title = row['Title'] || '';
+    const updated = { ...row };
+
+    if (title) {
+      // Primary product row — find matching plant
+      const match = plantByTitle.get(normalizeName(title));
+      lastPlant = match || null;
+
+      if (match) {
+        updated['Description'] = match.description || '';
+        updated['Tags']        = buildTags(match, row['Tags']);
+        updated['Categories']  = buildCategories(match, row['Categories']);
+      }
+    } else {
+      // Variant row — copy tags/categories from last primary, leave Description empty
+      if (lastPlant) {
+        updated['Tags']       = buildTags(lastPlant, row['Tags']);
+        updated['Categories'] = buildCategories(lastPlant, row['Categories']);
+      }
+      // Description stays empty for variant rows
+    }
+
+    return updated;
+  });
+
+  // Serialize as TSV (matching input format)
+  const tsvLines = [allHeaders.join('\t')];
+  for (const row of outputRows) {
+    tsvLines.push(allHeaders.map(h => (row[h] ?? '').replace(/\t/g, ' ')).join('\t'));
+  }
+
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const datetime = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+
+  const blob = new Blob([tsvLines.join('\n')], { type: 'text/tab-separated-values' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `squarespace-inventory.${datetime}.tsv`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -540,24 +666,10 @@ function downloadEnrichedCsv() {
 
 function applyEnrichedDataToRow(tr, badge, updatedPlant) {
   if (badge) applyBadge(badge, 'ai_enriched');
-  const inputs    = tr.querySelectorAll('input[type="text"]');
-  const textareas = tr.querySelectorAll('textarea');
-  const selects   = tr.querySelectorAll('.icon-fields select');
-  if (inputs[0])    inputs[0].value    = updatedPlant.latin           || '';
-  if (textareas[0]) textareas[0].value = updatedPlant.attributes_line || '';
-  if (textareas[1]) textareas[1].value = updatedPlant.highlight_line  || '';
-  if (selects[0])   selects[0].value   = updatedPlant.moisture        || '';
 
-  // Sun levels via data-sun-value checkboxes
-  const sunLevels = Array.isArray(updatedPlant.sun_levels) ? updatedPlant.sun_levels : [];
-  tr.querySelectorAll('.icon-fields input[data-sun-value]').forEach(cb => {
-    cb.checked = sunLevels.includes(cb.dataset.sunValue);
-  });
-
-  const critterCb = tr.querySelector('.icon-fields input[data-critter-check]');
-  const deerCb    = tr.querySelector('.icon-fields input[data-deer-check]');
-  if (critterCb) critterCb.checked = !!updatedPlant.is_pollinator;
-  if (deerCb)    deerCb.checked    = !!updatedPlant.is_deer_resistant;
+  // Update description div
+  const descDiv = tr.querySelector('.desc-edit');
+  if (descDiv) descDiv.innerHTML = updatedPlant.description || '';
 }
 
 // ─── Enrichment UI ────────────────────────────────────────────────────────────
@@ -611,4 +723,58 @@ async function startEnrichment(limit) {
   // Refresh pending count on buttons
   const pendingCount = plants.filter(p => p.source === 'pending').length;
   document.getElementById('enrich-btn-all').textContent = `Enrich all (${pendingCount}) pending plants`;
+}
+
+// ─── Merge UI ─────────────────────────────────────────────────────────────────
+
+async function startMerge(limit) {
+  const apiKey = document.getElementById('openai-key').value.trim();
+  if (!apiKey) {
+    const s = document.getElementById('merge-status');
+    s.style.color = '#c0392b';
+    s.textContent = 'Please enter an OpenAI API key first.';
+    return;
+  }
+
+  const mergeBtns    = document.querySelectorAll('.merge-btn');
+  const statusEl     = document.getElementById('merge-status');
+  const progressWrap = document.getElementById('merge-progress-wrap');
+  const progressBar  = document.getElementById('merge-progress-bar');
+  const progressLabel= document.getElementById('merge-progress-label');
+
+  mergeBtns.forEach(b => b.disabled = true);
+  statusEl.textContent = '';
+  progressWrap.style.display = 'block';
+  progressBar.style.width = '0%';
+
+  let errors = 0;
+
+  await mergeAllUnmerged(apiKey, limit ?? Infinity, (completed, total, updatedPlant) => {
+    const pct = Math.round((completed / total) * 100);
+    progressBar.style.width = pct + '%';
+    progressLabel.textContent = `Merging… ${completed} / ${total}`;
+
+    if (updatedPlant.mergeError) { errors++; return; }
+
+    // Update description div and merged badge in table
+    const tr = document.querySelector(`tr[data-idx="${plants.indexOf(updatedPlant)}"]`);
+    if (tr) {
+      const descDiv = tr.querySelector('.desc-edit');
+      if (descDiv) descDiv.innerHTML = updatedPlant.description || '';
+      const mb = tr.querySelector('.desc-merged-badge');
+      if (mb) mb.style.display = '';
+    }
+    renderSummary();
+  });
+
+  progressWrap.style.display = 'none';
+  statusEl.style.color = errors ? '#c0392b' : '#2d5a27';
+  statusEl.textContent = errors
+    ? `Done — ${errors} plant(s) failed to merge. Check console for details.`
+    : `✓ Done merging descriptions.`;
+  mergeBtns.forEach(b => b.disabled = false);
+
+  // Refresh unmerged count on buttons
+  const unmergedCount = plants.filter(p => !p.description_merged && p.source !== 'pending').length;
+  document.getElementById('merge-btn-all').textContent = `Merge all (${unmergedCount}) unmerged`;
 }
