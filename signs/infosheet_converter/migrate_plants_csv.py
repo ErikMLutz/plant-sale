@@ -5,8 +5,8 @@ migrate_plants_csv.py — Convert old enriched plants.csv format to new SS-first
 Input:  ~/Downloads/upload/plants.improved.csv  (old format)
 Output: ~/Downloads/upload/plants.improved.<YYYYMMDD_HHMMSS>.csv  (new format)
 
-Old columns kept: common, piedmont_native, flag_for_review, reason_for_review, source
-Old columns dropped: latin, sun_levels, moisture, is_pollinator, is_deer_resistant
+Old columns kept: common, latin, piedmont_native, flag_for_review, reason_for_review, source
+Old columns dropped: sun_levels, moisture, is_pollinator, is_deer_resistant
 New columns generated:
   - description: HTML from attributes_line + highlight_line
   - description_merged: false (not yet merged against SS)
@@ -60,7 +60,7 @@ def migrate(input_path: Path, output_path: Path) -> None:
         print('Is this already in the new format?')
         sys.exit(1)
 
-    new_headers = ['common', 'piedmont_native', 'description', 'flag_for_review', 'reason_for_review', 'description_merged', 'source']
+    new_headers = ['common', 'latin', 'piedmont_native', 'description', 'flag_for_review', 'reason_for_review', 'description_merged', 'source']
     out_rows = []
 
     skipped = 0
@@ -80,6 +80,7 @@ def migrate(input_path: Path, output_path: Path) -> None:
 
         out_rows.append({
             'common':             common,
+            'latin':              row.get('latin', '').strip(),
             'piedmont_native':    row.get('piedmont_native', 'false'),
             'description':        description,
             'flag_for_review':    row.get('flag_for_review', 'false'),
