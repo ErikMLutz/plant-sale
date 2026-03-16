@@ -208,9 +208,16 @@ let allSsCategories = new Set();
  * HTML when no CSV match exists.
  *
  * Populates rawSsRows, allSsTags, allSsCategories globals.
+ *
+ * @param {Object[]} rows - Filtered rows to import for review (Visible=yes, excluded pages removed).
+ * @param {Map}      csvMap - plants.csv data keyed by normalized common name.
+ * @param {Object[]} allRows - Full unfiltered SS rows; stored in rawSsRows so the
+ *   "Download updated SS inventory" export preserves ALL original rows (variants, hidden
+ *   products, excluded pages) and only modifies Description/Tags/Categories.
+ *   Defaults to rows if omitted (backward compat).
  */
-function parseSquarespaceRows(rows, csvMap) {
-  rawSsRows = rows;
+function parseSquarespaceRows(rows, csvMap, allRows) {
+  rawSsRows = allRows || rows;
   allSsTags = new Set();
   allSsCategories = new Set();
 

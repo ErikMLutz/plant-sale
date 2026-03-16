@@ -94,7 +94,7 @@ function runImport(ssContent, latestCsvContent) {
       );
     }
 
-    plants = parseSquarespaceRows(filteredRows, csvMap);
+    plants = parseSquarespaceRows(filteredRows, csvMap, rows);
 
     if (DEBUG && debugState.limitEnabled && plants.length > debugState.limitValue) {
       if (debugState.pickOverlap && csvMap.size > 0) {
@@ -862,6 +862,40 @@ async function downloadZipFile() {
   await downloadZip(csvText);
 }
 
+/**
+ * Validate that the updated SS inventory only differs from the original in
+ * Description, Tags, and Categories columns. Logs errors to console and
+ * returns an array of error strings (empty = clean).
+ */
+function validateSsInventory(originalRows, updatedRows) {
+  const ALLOWED = new Set(['Description', 'Tags', 'Categories']);
+  const errors = [];
+
+  if (originalRows.length !== updatedRows.length) {
+    errors.push(`Row count mismatch: original ${originalRows.length}, updated ${updatedRows.length}`);
+    return errors;
+  }
+
+  const allHeaders = originalRows.length > 0 ? Object.keys(originalRows[0]) : [];
+  const checkHeaders = allHeaders.filter(h => !ALLOWED.has(h));
+
+  for (let i = 0; i < originalRows.length; i++) {
+    const orig = originalRows[i];
+    const upd  = updatedRows[i];
+    const label = orig['Title'] ? `"${orig['Title']}"` : `variant row ${i + 1}`;
+    for (const h of checkHeaders) {
+      const ov = orig[h] ?? '';
+      const uv = upd[h]  ?? '';
+      if (ov !== uv) {
+        const msg = `Row ${i + 1} ${label}: field "${h}" changed from "${ov}" to "${uv}"`;
+        errors.push(msg);
+        console.error('[SS inventory validator]', msg);
+      }
+    }
+  }
+  return errors;
+}
+
 function downloadUpdatedSsInventory() {
   if (!rawSsRows || rawSsRows.length === 0) {
     alert('No Squarespace data loaded — import first.');
@@ -912,19 +946,35 @@ function downloadUpdatedSsInventory() {
     return updated;
   });
 
-  const tsvLines = [allHeaders.join('\t')];
+  // Validate: only Description/Tags/Categories should differ from the original
+  const validationErrors = validateSsInventory(rawSsRows, outputRows);
+  if (validationErrors.length > 0) {
+    const summary = validationErrors.slice(0, 5).join('\n') +
+      (validationErrors.length > 5 ? `\n…and ${validationErrors.length - 5} more (see console)` : '');
+    alert(`SS inventory validation failed — unexpected fields changed:\n\n${summary}\n\nDownload blocked. Check the console for details.`);
+    return;
+  }
+
+  function csvCell(val) {
+    const s = String(val ?? '');
+    return (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r'))
+      ? '"' + s.replace(/"/g, '""') + '"'
+      : s;
+  }
+
+  const csvLines = [allHeaders.map(csvCell).join(',')];
   for (const row of outputRows) {
-    tsvLines.push(allHeaders.map(h => (row[h] ?? '').replace(/\t/g, ' ')).join('\t'));
+    csvLines.push(allHeaders.map(h => csvCell(row[h] ?? '')).join(','));
   }
 
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
   const datetime = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 
-  const blob = new Blob([tsvLines.join('\n')], { type: 'text/tab-separated-values' });
+  const blob = new Blob([csvLines.join('\n')], { type: 'text/csv' });
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
-  a.download = `squarespace-inventory.${datetime}.tsv`;
+  a.download = `squarespace-inventory.${datetime}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
