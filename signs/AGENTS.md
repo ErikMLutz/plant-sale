@@ -99,7 +99,7 @@ column, then push that data into Squarespace so it becomes part of the sign sour
 
 ### `public/` — the app (static site, open `index.html` directly in a browser)
 
-No server, no build step, plain JS split across focused files. Uses **pptxgenjs** via CDN.
+No server, no build step, plain JS split across focused files. Uses **pptxgenjs**, **JSZip**, and **Quill** via CDN.
 
 ```
 public/
@@ -110,30 +110,44 @@ public/
     ├── parse.js      — CSV/TSV parsing, legacy matching, Squarespace parsing
     ├── images.js     — fetchForPptx, convertToJpeg, estimateWrappedLines
     ├── pptx.js       — addSignToSlide, generatePPTX, parseAttributes, buildIcons
-    └── app.js        — plants[] state, UI handlers, import flow, review table
+    ├── enrich.js     — OpenAI enrichment and merge (buildPrompt, enrichPlant, mergeDescription, ...)
+    ├── zip.js        — JSZip helpers: readZipFile(), downloadZip(); globals zipSsFileName/Content/OldCsvFiles
+    └── app.js        — plants[] state, UI handlers, import flow, review panel
 ```
 
-Scripts load in dependency order via plain `<script>` tags at bottom of `<body>`. All globals are shared across files (no modules).
+Scripts load in dependency order: `config.js → parse.js → images.js → pptx.js → enrich.js → zip.js → app.js`. All globals shared across files (no modules).
 
 #### App flow
 
-**Step 1 — Import**
-- Paste or upload the **Squarespace product export** (TSV or CSV, auto-detected)
-- Optionally paste or upload **`plants.csv`** (`plants.improved.*.csv` from a prior run)
-- Click Import → parses both, matches plants by name, shows summary
-- Squarespace is the single source of truth for tags/categories/photos; plants.csv supplies description + piedmont_native
+**Step 1 — Upload**
+- User uploads a single **`plant-sale-signs-data.*.zip`** file
+- `readZipFile()` (zip.js) extracts: the SS inventory TSV + all `plants.improved.*.csv` files; picks the latest CSV by filename timestamp
+- All files in the zip are preserved in memory (`zipOldCsvFiles`) and re-bundled into the download zip
+- The coordinator creates the initial zip from `~/Downloads/upload/` using the shell
 
-**Step 2 — AI Enrichment & Description Merge (optional)**
+**Step 2 — AI Enrichment & Description Merge (optional, collapsed by default)**
 - **Enrich**: fills `description` (HTML) for pending plants via gpt-4o with web search (~$0.03/plant)
 - **Merge**: reconciles CSV-derived descriptions against SS data via gpt-4o-mini (~$0.001/plant)
-- Both can be done per-row in Step 3 with Auto-enrich / Auto-merge buttons
+- Both available bulk (Step 2) and per-plant (Step 3 action buttons)
+- Step 2 is hidden until after import, and collapsed by default — most reviewers skip it
 
 **Step 3 — Review & Edit**
-- Editable table, paginated (10 per page), sorted by: Needs enrichment → AI Enriched → Manually Enriched → plants.csv
-- Columns: Source badge, Common Name, Photo, Description (contenteditable HTML), Tags (checkboxes), Categories (checkboxes)
-- "Download plants.csv" exports `plants.improved.<datetime>.csv`
-- "Download updated SS inventory" exports the original SS export TSV with updated Description/Tags/Categories
-- "Generate PPTX (N plants)" button → downloads `.pptx`
+- **Single-plant panel** (not a table): one plant at a time with prev/next navigation
+- **Fuzzy search**: Fuse.js v7 search bar above the sort checkboxes; sorts by match score (matched plants float first, all plants always shown — never filtered out); searches common name (weight 3), category (2), tags (2), description text (1), reason_for_review (1)
+- **Category sort**: multi-select checkboxes; 1 selected → plants with that category float to top; 2+ selected → sorted by match count descending; within each group, default sort applies
+- **Default sort order**: needs enrichment → needs merging (csv + !description_merged) → potential issue (flag_for_review) → unreviewed → reviewed
+- **Nav bar**: ← Prev | Plant N of M | ⚪ Unreviewed/✅ Reviewed badge | Source badge | 🟤 Needs merging badge (when not merged) | ⚠ Potential issue badge | plant name | Next →
+- **Plant detail**: photo (left, loads async with grey placeholder during load) + content column (right)
+- **Content column** (top to bottom): action buttons → flag/reason row → Quill WYSIWYG editor → tags checkboxes → categories checkboxes
+- **Quill editor**: snow theme, toolbar: bold / italic / bullet list; `setQuillContent(html)` / `readQuillHtml()` are the canonical read/write functions; `setQuillContent` uses `quill.clipboard.convert({ html })` + `quill.setContents(delta, 'silent')` to avoid scroll jumps and spurious text-change events; description flushed to plant object on every text-change and on navigate (but NOT on first load — see `idx !== currentPlantIdx` guard in `navigateTo`)
+- **Mark Reviewed**: toggles `plant.reviewed`; also clears `flag_for_review` and `reason_for_review` when marking reviewed. Does NOT re-sort the list. Button styled via `updateMarkReviewedBtn` — `btn-action` (green fill) when unreviewed, `secondary` when already reviewed
+- **Tags/Categories**: pill-style checkboxes, fixed 160px width so they align in columns; tags are normalized to lowercase at parse time (Squarespace treats `Sun` and `sun` identically)
+- **Button classes**: `btn-action` = green fill, small size (same as `secondary` but filled); used for Mark Reviewed and Download review zip
+
+**Step 4 — Download**
+- **Download review zip**: calls `downloadZip(csvText)` — creates new zip with SS inventory + all prior CSVs + new `plants.improved.<datetime>.csv`
+- **Generate PPTX**: fetches photos, builds PowerPoint
+- **Download updated SS inventory**: exports original SS TSV with updated Description/Tags/Categories
 
 #### Key data structures
 
@@ -146,13 +160,28 @@ Scripts load in dependency order via plain `<script>` tags at bottom of `<body>`
   description,
   // Original SS description HTML — preserved for merge prompt input only
   ss_description_html,
-  // From plants.csv
+  // From plants.csv (or derived)
   piedmont_native, flag_for_review, reason_for_review, description_merged,
+  reviewed,   // boolean — set true by "Mark Reviewed"; persisted in plants.csv
   // Derived from SS tags (authoritative)
   sun_levels, moisture, is_pollinator, is_deer_resistant,
   // Enrichment provenance
   source: 'pending' | 'csv' | 'ai_enriched' | 'manually_enriched',
 }
+```
+
+**Review panel globals** (app.js):
+```js
+let currentPlantIdx   = 0;       // index into sortedPlantsCache
+let sortedPlantsCache = [];      // sorted view of plants[]; rebuilt by rebuildSort()
+let quill             = null;    // Quill instance, initialized once in buildReviewPanel()
+```
+
+**Zip globals** (zip.js):
+```js
+let zipSsFileName  = null;   // filename of SS inventory in the zip
+let zipSsContent   = null;   // raw text of SS inventory
+let zipOldCsvFiles = [];     // [{name, content}] all plants.improved.*.csv from uploaded zip
 ```
 
 #### Squarespace export format
@@ -164,11 +193,20 @@ Scripts load in dependency order via plain `<script>` tags at bottom of `<body>`
 - All unique tag/category values collected into globals `allSsTags`, `allSsCategories` for checkbox rendering
 
 #### `plants.csv` format
-- **New format** (output of "Download plants.csv"): `common, piedmont_native, description, flag_for_review, reason_for_review, description_merged, source`
+- **Current format**: `common, piedmont_native, description, flag_for_review, reason_for_review, description_merged, source, reviewed`
   - `description` is HTML: `<ul><li><strong>Label:</strong> value</li>...</ul><p>Highlight.</p>`
   - `description_merged` is `true` after AI merge reconciliation
+  - `reviewed` is `true` after user clicks "Mark Reviewed"
+  - `source` values: `csv` | `ai_enriched` | `manually_enriched` (pending plants are NOT written to CSV)
 - **Old format** (backward compat — auto-detected by presence of `attributes_line`): `common, attributes_line, highlight_line, ...` — auto-converted to HTML description on load
 - Matched to Squarespace by normalized common name (lowercase, alphanumeric only)
+- **CSV round-trip**: HTML stored as a double-quoted RFC 4180 field; `parseCsvLine` handles quotes and commas inside HTML correctly; `&nbsp;` stripped from Quill output via `.replace(/&nbsp;/g, ' ')` before storing
+
+#### Zip file format
+- Contains: SS inventory TSV (any name not matching `plants.improved.*.csv`) + one or more `plants.improved.<YYYYMMDD_HHMMSS>.csv` files
+- On upload: latest CSV (by filename sort) is used; all CSVs preserved for re-bundling
+- On download: new CSV added; all prior CSVs retained; named `plant-sale-signs-data.<datetime>.zip`
+- **Do not modify zip contents manually** — pass as-is between reviewers
 
 ---
 
@@ -223,7 +261,7 @@ Adding a new toggle: add a checkbox to the `#debug-panel` HTML, read it in `sync
 Built in `js/enrich.js`.
 
 **Three enrichment paths available to users:**
-1. **Auto-enrich** — enter OpenAI API key in Step 2, click Enrich; processes all pending plants at concurrency 3 using gpt-4o with web search
+1. **Auto-enrich** — enter OpenAI API key in Step 2, click Enrich; processes all pending plants at **concurrency 10** using gpt-4o with web search (~$0.03/plant); failed plants stay `source: 'pending'` and can be retried
 2. **Copy prompt + AI** — click "Copy prompt" on a pending row, paste into any AI (Claude/ChatGPT), copy the JSON output, click "Fill from clipboard" to apply
 3. **Manual edit** — type/edit HTML directly in the Description field; row becomes "Manually Enriched"
 
@@ -242,10 +280,11 @@ Built in `js/enrich.js`.
 ```
 
 **Description merge** — `buildMergePrompt(plant)` / `mergeDescription(plant, apiKey)` / `mergeAllUnmerged()`:
-- Uses gpt-4o-mini (no web search, ~$0.001/plant)
+- Uses gpt-4o-mini (no web search, ~$0.001/plant); **concurrency 30**
 - Input: `plant.ss_description_html` (truth), `plant.tags`, `plant.category`, `plant.description` (CSV)
 - Output: reconciled HTML description; sets `plant.description_merged = true`
 - Skips plants already merged (`description_merged === true`) and pending plants (nothing to merge with)
+- Prompt instructs: start from CSV as-is, only fix values that contradict SS data, preserve all `<li>` labels and order exactly
 
 ---
 

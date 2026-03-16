@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Plant Sale Sign Generator</title>
   <link rel="stylesheet" href="styles.css" />
+  <link href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.snow.css" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7/dist/fuse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.js"></script>
 </head>
 <body>
 
@@ -32,7 +36,6 @@
         <div style="font-size:0.88em; font-weight:bold; color:#444; font-family:Calibri,sans-serif; margin-bottom:4px;">Squarespace import filters</div>
         <div style="font-size:0.85em; color:#777; font-family:Calibri,sans-serif; margin-bottom:10px;">
           Applied before importing — rows that don't pass are silently excluded.
-          Use this to keep non-plant products (vegetables, herbs, houseplants) out of the sign run.
         </div>
         <div style="display:flex; flex-direction:column; gap:8px; font-family:Calibri,sans-serif; font-size:0.88em; color:#555;">
           <label style="display:flex; align-items:center; gap:8px;">
@@ -52,10 +55,6 @@
 
       <div>
         <div style="font-size:0.88em; font-weight:bold; color:#444; font-family:Calibri,sans-serif; margin-bottom:4px;">Slide size</div>
-        <div style="font-size:0.85em; color:#777; font-family:Calibri,sans-serif; margin-bottom:10px;">
-          8.5 × 11 in (letter) fits two signs per page for printing and cutting.
-          The cut gap is blank whitespace between the two signs.
-        </div>
         <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; font-family:Calibri,sans-serif; font-size:0.88em; color:#555;">
           <label style="display:flex; align-items:center; gap:6px;">
             Width (in):
@@ -75,15 +74,11 @@
               style="width:70px; padding:3px 6px; border:1px solid #ccc; border-radius:3px; font-size:1em;"
               onchange="syncSettings()" />
           </label>
-          <span style="color:#aaa; font-size:0.9em;">Default: 8.5 × 11 in, 1/8" gap</span>
         </div>
       </div>
 
       <div>
         <div style="font-size:0.88em; font-weight:bold; color:#444; font-family:Calibri,sans-serif; margin-bottom:4px;">Font sizes (pt)</div>
-        <div style="font-size:0.85em; color:#777; font-family:Calibri,sans-serif; margin-bottom:10px;">
-          Adjust to taste. Changes take effect on the next PPTX generation.
-        </div>
         <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; font-family:Calibri,sans-serif; font-size:0.88em; color:#555;">
           <label style="display:flex; align-items:center; gap:6px;">
             Title (common name):
@@ -115,7 +110,7 @@
   });
 </script>
 
-<!-- Debug panel — hidden by default; shown when debug toggle is on -->
+<!-- Debug panel -->
 <div id="debug-panel" style="display:none; background:#fff8e1; border:2px dashed #f39c12; border-radius:6px; padding:14px 20px; margin-bottom:20px;">
   <div style="font-size:0.8em; font-weight:bold; color:#b7770d; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px;">
     ⚠ Debug Mode
@@ -141,169 +136,201 @@
   </div>
 </div>
 
-<!-- Step 1: Import -->
-<div class="card" id="import-section">
-  <h2>Step 1 — Import Data</h2>
-  <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px; display:flex; flex-direction:column; gap:6px;">
-    <p style="margin:0;">
-      <strong>Squarespace export</strong> — go to <em>Commerce → Products</em>, select all products, and export as CSV or TSV.
-      Paste the file contents or upload it.
-    </p>
-    <p style="margin:0;">
-      <strong>plants.csv</strong> — optional but recommended after your first run.
-      Upload the <code>plants.improved.*.csv</code> downloaded from Step 3 to skip re-enriching plants you've already filled in.
-      Plants are matched by common name; unmatched ones will need enrichment.
-    </p>
-  </div>
-  <div class="import-grid">
-
-    <div class="upload-area">
-      <label class="area-label" for="ss-textarea">Squarespace Export <span style="color:#c0392b">*</span></label>
-      <div class="area-note">CSV or TSV export from Squarespace Products — auto-detected</div>
-      <textarea id="ss-textarea" placeholder="Paste CSV or TSV content here…"></textarea>
-      <div class="file-row">
-        <button class="secondary" onclick="document.getElementById('ss-file').click()">Or upload file…</button>
-        <span id="ss-file-name">No file chosen</span>
-        <input type="file" id="ss-file" accept=".tsv,.csv,.txt" style="display:none" onchange="handleSsFile(this)" />
-      </div>
-    </div>
-
-    <div class="upload-area">
-      <label class="area-label">plants.csv <span style="color:#999;font-weight:normal">(optional)</span></label>
-      <div class="area-note">CSV — auto-detected. Pre-fills descriptions for matched plants.</div>
-      <textarea id="plants-textarea" placeholder="Paste CSV or TSV content here…"></textarea>
-      <div class="file-row">
-        <button class="secondary" onclick="document.getElementById('plants-file').click()">Or upload file…</button>
-        <span id="plants-file-name">No file chosen</span>
-        <input type="file" id="plants-file" accept=".csv,.txt,.tsv" style="display:none" onchange="handlePlantsFile(this)" />
-      </div>
-      <div class="area-hint">If provided, plants matched by name will use existing descriptions and piedmont_native flags.</div>
-    </div>
-
-  </div>
-  <button onclick="runImport()">Import</button>
-  <div id="import-status" style="margin-top:10px;font-size:0.85em;color:#555;min-height:1.2em;"></div>
+<!-- How to use -->
+<div class="card instructions-card">
+  <h2>How to Use</h2>
+  <ol class="instructions-list">
+    <li><strong>Upload</strong> the <code>plant-sale-signs-data.*.zip</code> file you received, then click Import.</li>
+    <li><strong>Review</strong> each plant in Step 3 — edit descriptions, adjust tags and categories, and click <em>Mark Reviewed</em> when done.</li>
+    <li><strong>Download</strong> the updated zip in Step 4 and pass it to the next reviewer (or return it to the coordinator).</li>
+  </ol>
+  <p class="instructions-note">Do not unzip or modify the zip file's contents — pass it as-is. Only the technical coordinator should work with the raw files inside.</p>
 </div>
 
-<!-- Step 2: AI Enrichment + Merge -->
-<div class="card" id="enrich-section" style="display:none;">
-  <h2>Step 2 — AI Enrichment &amp; Description Merge <span style="font-size:0.7em; color:#888; font-weight:normal;">(Optional)</span></h2>
-
-  <!-- Enrich sub-section -->
-  <div style="border-bottom:1px solid #e0e0d8; padding-bottom:18px; margin-bottom:18px;">
-    <div style="font-size:0.9em; font-weight:bold; color:#444; font-family:Calibri,sans-serif; margin-bottom:8px;">
-      AI Enrichment — fills descriptions for plants not in plants.csv
-    </div>
-    <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px; display:flex; flex-direction:column; gap:8px;">
-      <p style="margin:0;">
-        Uses <strong>OpenAI gpt-4o</strong> with live web search. Prefers NCSU Plant Toolbox, Prairie Moon Nursery,
-        USDA Plants, FSUS, and Missouri Botanical Garden. Falls back to botanical training knowledge.
-        <strong>Cost:</strong> ~$0.03 per plant (~$6 for a full 200-plant sale).
-      </p>
-      <p style="margin:0;">
-        <strong>No API key?</strong> Use <em>Copy prompt</em> per row, paste into ChatGPT or Claude, copy the JSON, then click <em>Fill from clipboard</em>.
-        Or edit fields directly in Step 3 — rows become "Manually Enriched."
-      </p>
-    </div>
-    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:2px;">
-      <button id="enrich-btn-all" class="enrich-btn" onclick="startEnrichment()">Enrich all pending plants</button>
-      <button class="enrich-btn secondary" onclick="startEnrichment(10)">Enrich 10</button>
-      <button class="enrich-btn secondary" onclick="startEnrichment(1)">Enrich 1</button>
-    </div>
-    <div id="enrich-progress-wrap" style="display:none; margin-top:12px;">
-      <div id="enrich-progress-label" style="font-size:0.82em; color:#555; font-family:Calibri,sans-serif; margin-bottom:4px;"></div>
-      <div style="background:#e0e0d8; border-radius:4px; height:10px; overflow:hidden;">
-        <div id="enrich-progress-bar" style="height:100%; width:0%; background:#2d5a27; transition:width 0.2s ease;"></div>
-      </div>
-    </div>
-    <div id="enrich-status" style="margin-top:10px; font-size:0.85em; min-height:1.2em;"></div>
-  </div>
-
-  <!-- Merge sub-section -->
-  <div>
-    <div style="font-size:0.9em; font-weight:bold; color:#444; font-family:Calibri,sans-serif; margin-bottom:8px;">
-      AI Description Merge — reconciles plants.csv descriptions against Squarespace data
-    </div>
-    <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px; display:flex; flex-direction:column; gap:8px;">
-      <p style="margin:0;">
-        Uses <strong>gpt-4o-mini</strong> (no web search — text processing only, ~$0.001/plant).
-        Compares the CSV-derived description against Squarespace tags and description, removes contradictions,
-        and produces a clean reconciled HTML description. Can also be done per-row in Step 3.
-      </p>
-    </div>
-    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:2px;">
-      <button id="merge-btn-all" class="merge-btn" onclick="startMerge()">Merge all unmerged</button>
-      <button class="merge-btn secondary" onclick="startMerge(10)">Merge 10</button>
-      <button class="merge-btn secondary" onclick="startMerge(1)">Merge 1</button>
-    </div>
-    <div id="merge-progress-wrap" style="display:none; margin-top:12px;">
-      <div id="merge-progress-label" style="font-size:0.82em; color:#555; font-family:Calibri,sans-serif; margin-bottom:4px;"></div>
-      <div style="background:#e0e0d8; border-radius:4px; height:10px; overflow:hidden;">
-        <div id="merge-progress-bar" style="height:100%; width:0%; background:#7d5a3a; transition:width 0.2s ease;"></div>
-      </div>
-    </div>
-    <div id="merge-status" style="margin-top:10px; font-size:0.85em; min-height:1.2em;"></div>
-  </div>
-
-  <!-- Shared API key input -->
-  <div style="background:#fde8e8; border:2px solid #c0392b; border-radius:6px; padding:12px 16px; margin-top:18px; margin-bottom:14px;">
-    <strong style="color:#7b1c1c;">⚠ Security warning:</strong>
-    <span style="color:#7b1c1c; font-family:Calibri,sans-serif; font-size:0.88em;">
-      Never enter an API key on a website you don't personally own and/or trust — the site owner can steal it and charge API calls to your account.
-      Only use this if you truly trust the site and know its source/origin.
-    </span>
+<!-- Step 1: Upload -->
+<div class="card" id="import-section">
+  <h2>Step 1 — Upload</h2>
+  <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin-bottom:14px;">
+    Upload the <code>plant-sale-signs-data.*.zip</code> file. The app will automatically find the Squarespace inventory
+    and the most recent plant descriptions inside.
   </div>
   <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-    <label style="font-size:0.88em; font-family:Calibri,sans-serif; color:#555;">
-      OpenAI API key:
-    </label>
-    <input type="password" id="openai-key" placeholder="sk-..."
-      style="flex:1; min-width:200px; max-width:380px; padding:5px 8px; font-size:0.88em; font-family:Calibri,sans-serif; border:1px solid #ccc; border-radius:4px;"
-      oninput="syncRowEnrichBtns()" />
-    <button class="secondary" onclick="saveApiKey()">Save key</button>
-    <span id="key-status" style="font-size:0.8em; font-family:Calibri,sans-serif; color:#888;"></span>
+    <input type="file" id="zip-file" accept=".zip" style="display:none" onchange="handleZipUpload()" />
+    <button onclick="document.getElementById('zip-file').click()">Choose zip file…</button>
+    <span id="zip-file-name" style="font-size:0.88em; color:#888; font-family:Calibri,sans-serif;">No file chosen</span>
   </div>
+  <div id="import-status" style="margin-top:10px; font-size:0.85em; color:#555; min-height:1.2em;"></div>
 </div>
 
-<!-- Step 3: Review + Generate -->
-<div class="card" id="review-section" style="display:none;">
-  <div style="display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:10px;">
-    <h2 style="margin:0 0 14px;">Step 3 — Review &amp; Edit</h2>
-    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
-      <button class="secondary" onclick="downloadEnrichedCsv()">Download plants.csv</button>
-      <button class="secondary" onclick="downloadUpdatedSsInventory()">Download updated SS inventory</button>
+<!-- Step 2: AI Enrichment + Merge (collapsed by default) -->
+<div class="card" id="enrich-section" style="display:none;">
+  <div class="collapsible-header" onclick="toggleEnrichContent(this)">
+    <h2 style="margin:0;">Step 2 — AI Enrichment &amp; Description Merge <span style="font-size:0.7em; color:#888; font-weight:normal;">(Optional)</span></h2>
+    <span class="collapsible-arrow">▶</span>
+  </div>
+  <div id="enrich-content" style="display:none; margin-top:16px;">
+
+    <!-- Enrich sub-section -->
+    <div style="border-bottom:1px solid #e0e0d8; padding-bottom:18px; margin-bottom:18px;">
+      <div style="font-size:0.9em; font-weight:bold; color:#444; font-family:Calibri,sans-serif; margin-bottom:8px;">
+        AI Enrichment — fills descriptions for plants not in the uploaded CSV
+      </div>
+      <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px; display:flex; flex-direction:column; gap:8px;">
+        <p style="margin:0;">
+          Uses <strong>OpenAI gpt-4o</strong> with live web search. Prefers NCSU Plant Toolbox, Prairie Moon Nursery,
+          USDA Plants, FSUS, and Missouri Botanical Garden.
+          <strong>Cost:</strong> ~$0.03 per plant.
+        </p>
+        <p style="margin:0;">
+          <strong>No API key?</strong> Use <em>Copy prompt</em> on the plant in Step 3, paste into ChatGPT or Claude,
+          copy the JSON output, then click <em>Fill from clipboard</em>.
+        </p>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:2px;">
+        <button id="enrich-btn-all" class="enrich-btn" onclick="startEnrichment()">Enrich all pending plants</button>
+        <button class="enrich-btn secondary" onclick="startEnrichment(10)">Enrich 10</button>
+        <button class="enrich-btn secondary" onclick="startEnrichment(1)">Enrich 1</button>
+      </div>
+      <div id="enrich-progress-wrap" style="display:none; margin-top:12px;">
+        <div id="enrich-progress-label" style="font-size:0.82em; color:#555; font-family:Calibri,sans-serif; margin-bottom:4px;"></div>
+        <div style="background:#e0e0d8; border-radius:4px; height:10px; overflow:hidden;">
+          <div id="enrich-progress-bar" style="height:100%; width:0%; background:#2d5a27; transition:width 0.2s ease;"></div>
+        </div>
+      </div>
+      <div id="enrich-status" style="margin-top:10px; font-size:0.85em; min-height:1.2em;"></div>
     </div>
+
+    <!-- Merge sub-section -->
+    <div>
+      <div style="font-size:0.9em; font-weight:bold; color:#444; font-family:Calibri,sans-serif; margin-bottom:8px;">
+        AI Description Merge — reconciles CSV descriptions against Squarespace data
+      </div>
+      <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px; display:flex; flex-direction:column; gap:8px;">
+        <p style="margin:0;">
+          Uses <strong>gpt-4o-mini</strong> (~$0.001/plant). Compares the CSV-derived description against Squarespace
+          tags and description, removes contradictions, and produces a clean reconciled HTML description.
+        </p>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:2px;">
+        <button id="merge-btn-all" class="merge-btn" onclick="startMerge()">Merge all unmerged</button>
+        <button class="merge-btn secondary" onclick="startMerge(10)">Merge 10</button>
+        <button class="merge-btn secondary" onclick="startMerge(1)">Merge 1</button>
+      </div>
+      <div id="merge-progress-wrap" style="display:none; margin-top:12px;">
+        <div id="merge-progress-label" style="font-size:0.82em; color:#555; font-family:Calibri,sans-serif; margin-bottom:4px;"></div>
+        <div style="background:#e0e0d8; border-radius:4px; height:10px; overflow:hidden;">
+          <div id="merge-progress-bar" style="height:100%; width:0%; background:#7d5a3a; transition:width 0.2s ease;"></div>
+        </div>
+      </div>
+      <div id="merge-status" style="margin-top:10px; font-size:0.85em; min-height:1.2em;"></div>
+    </div>
+
+    <!-- API key -->
+    <div style="background:#fde8e8; border:2px solid #c0392b; border-radius:6px; padding:12px 16px; margin-top:18px; margin-bottom:14px;">
+      <strong style="color:#7b1c1c;">⚠ Security warning:</strong>
+      <span style="color:#7b1c1c; font-family:Calibri,sans-serif; font-size:0.88em;">
+        Never enter an API key on a website you don't personally own and trust.
+      </span>
+    </div>
+    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      <label style="font-size:0.88em; font-family:Calibri,sans-serif; color:#555;">OpenAI API key:</label>
+      <input type="password" id="openai-key" placeholder="sk-..."
+        style="flex:1; min-width:200px; max-width:380px; padding:5px 8px; font-size:0.88em; font-family:Calibri,sans-serif; border:1px solid #ccc; border-radius:4px;"
+        oninput="syncRowEnrichBtns()" />
+      <button class="secondary" onclick="saveApiKey()">Save key</button>
+      <span id="key-status" style="font-size:0.8em; font-family:Calibri,sans-serif; color:#888;"></span>
+    </div>
+
+  </div><!-- /#enrich-content -->
+</div>
+
+<!-- Step 3: Review panel -->
+<div class="card" id="review-section" style="display:none;">
+  <h2 style="margin:0 0 14px;">Step 3 — Review &amp; Edit</h2>
+
+  <!-- Category sort -->
+  <div id="category-sort-row">
+    <span class="review-field-label" style="font-size:0.85em;">Sort by category:</span>
+    <span id="category-checkboxes"></span>
   </div>
-  <p style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 14px;">
-    Plants marked <strong>Needs enrichment</strong> are missing data. Three ways to fill them in:
-  </p>
-  <ol style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin:0 0 16px; padding-left:1.4em; line-height:1.7;">
-    <li><strong>Bulk auto-enrich / merge</strong> — enter an OpenAI API key in Step 2 and click the Enrich or Merge buttons.</li>
-    <li><strong>Per-row auto-enrich / merge</strong> — once an API key is entered, <em>Auto-enrich</em> and <em>Auto-merge</em> buttons appear on every row.</li>
-    <li><strong>Copy prompt + AI</strong> — click <em>Copy prompt</em> on any row, paste into ChatGPT or Claude, copy the JSON output, then click <em>Fill from clipboard</em> to apply it.</li>
-    <li><strong>Manual edit</strong> — type or edit HTML directly in the Description field. The row will be marked Manually Enriched.</li>
-  </ol>
+
+  <!-- Search -->
+  <div id="search-row" style="display:flex; align-items:center; gap:8px; margin-bottom:10px; font-family:Calibri,sans-serif; font-size:0.85em; color:#555;">
+    <label for="plant-search" class="review-field-label" style="font-size:0.85em;">Search:</label>
+    <input type="search" id="plant-search" placeholder="Name, description, tags, categories…"
+      style="flex:1; max-width:360px; padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:1em; font-family:Calibri,sans-serif;"
+      oninput="handleSearchInput(this.value)" />
+    <span id="search-count" style="color:#888; font-size:0.9em;"></span>
+  </div>
+
+  <!-- Summary chips -->
   <div id="review-summary" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;"></div>
-  <div class="table-scroll">
-    <table id="review-table">
-      <thead>
-        <tr>
-          <th>Source</th>
-          <th>Common Name</th>
-          <th>Photo</th>
-          <th>Description <span style="font-weight:normal; color:#aaa;">(HTML)</span></th>
-          <th>Tags</th>
-          <th>Categories</th>
-        </tr>
-      </thead>
-      <tbody id="review-tbody"></tbody>
-    </table>
+
+  <!-- Navigation bar -->
+  <div id="review-nav">
+    <button id="btn-prev" class="secondary nav-btn">← Prev</button>
+    <span id="nav-counter" class="nav-counter">Plant 1 of 0</span>
+    <span id="nav-badge" class="badge badge-unreviewed">⚪ Unreviewed</span>
+    <span id="nav-source-badge" class="badge badge-pending">🟡 Needs enrichment</span>
+    <span id="nav-merge-badge" class="badge badge-needs-merge" style="display:none;">🟤 Needs merging</span>
+    <span id="nav-flag-badge" class="badge badge-review-needed" style="display:none;">⚠ Potential issue</span>
+    <span id="nav-plant-name" class="nav-plant-name"></span>
+    <button id="btn-next" class="secondary nav-btn">Next →</button>
   </div>
-  <div id="pagination"></div>
-  <div class="gen-row">
-    <button id="gen-btn" onclick="generatePPTX()">Generate PPTX (0 plants)</button>
-    <div id="status"></div>
+
+  <!-- Plant detail -->
+  <div id="review-plant">
+
+    <!-- Photo column -->
+    <div id="review-photo-col">
+      <img id="review-photo" src="" alt="" style="display:none;" />
+      <span id="review-no-photo" class="no-photo">No photo</span>
+    </div>
+
+    <!-- Content column -->
+    <div id="review-content-col">
+
+      <!-- Action buttons (top) -->
+      <div id="review-actions">
+        <button id="btn-auto-enrich-row" class="secondary" disabled>Auto-enrich</button>
+        <button id="btn-auto-merge-row"  class="secondary" disabled>Auto-merge</button>
+        <button id="btn-copy-prompt-row" class="secondary">Copy prompt</button>
+        <button id="btn-fill-clipboard-row" class="secondary">Fill from clipboard</button>
+        <button id="btn-mark-reviewed" class="btn-action">Mark Reviewed</button>
+      </div>
+
+      <!-- Flag row (hidden unless flagged) -->
+      <div id="review-flag-row" class="review-flag-row" style="display:none;">
+        <span class="badge badge-review-needed">⚠ Potential issue:</span>
+        <span id="review-flag-reason" class="review-reason"></span>
+      </div>
+
+      <!-- Quill editor -->
+      <div id="quill-container"></div>
+
+      <!-- Tags + Categories -->
+      <div id="review-checkboxes-row">
+        <div id="review-tags"></div>
+        <div id="review-categories"></div>
+      </div>
+
+    </div><!-- /#review-content-col -->
+  </div><!-- /#review-plant -->
+</div>
+
+<!-- Step 4: Download -->
+<div class="card" id="step4-section" style="display:none;">
+  <h2 style="margin:0 0 14px;">Step 4 — Download</h2>
+  <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin-bottom:16px;">
+    Download the updated zip to pass along, generate the PowerPoint for printing,
+    or export an updated Squarespace inventory.
   </div>
+  <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+    <button class="btn-action" onclick="downloadZipFile()">Download review zip</button>
+    <button class="secondary" onclick="generatePPTX()" id="gen-btn">Generate PPTX</button>
+    <button class="secondary" onclick="downloadUpdatedSsInventory()">Download updated SS inventory</button>
+  </div>
+  <div id="status" style="margin-top:14px; font-size:0.9em; color:#555; min-height:1.4em;"></div>
   <div id="progress-wrap" style="display:none; margin-top:12px;">
     <div id="progress-label" style="font-size:0.82em; color:#555; font-family:Calibri,sans-serif; margin-bottom:4px;">Fetching photos…</div>
     <div style="background:#e0e0d8; border-radius:4px; height:10px; overflow:hidden;">
@@ -312,12 +339,23 @@
   </div>
 </div>
 
+<script>
+  function toggleEnrichContent(header) {
+    const content = document.getElementById('enrich-content');
+    const arrow   = header.querySelector('.collapsible-arrow');
+    const open    = content.style.display === 'none';
+    content.style.display = open ? 'block' : 'none';
+    arrow.textContent     = open ? '▼' : '▶';
+  }
+</script>
+
 <!-- Scripts: load in dependency order -->
 <script src="js/config.js"></script>
 <script src="js/parse.js"></script>
 <script src="js/images.js"></script>
 <script src="js/pptx.js"></script>
 <script src="js/enrich.js"></script>
+<script src="js/zip.js"></script>
 <script src="js/app.js"></script>
 
 </body>

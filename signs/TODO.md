@@ -1,7 +1,8 @@
-- plants.csv
-   - create AI compare that checks flags contradictions between plants.csv and squarespace for human review
-     - when contradiction found: set flag_for_review=true (if not already), append reason to any existing reason_for_review
-     - this would surface in the "review needed" status badge in the review table
-- squarespace inventory update (lower priority)
-   - tooling to update squarespace inventory description based on whats in plants.csv
-   - update export -> reimport new descriptions -> squarespace is now the source of truth for signs
+# TODO
+
+## Known issues / next steps
+
+- [ ] Verify PPTX output quality end-to-end with a full enriched + merged dataset
+- [ ] Test zip round-trip with plants that have complex HTML descriptions (nested quotes, special chars)
+- [ ] Consider adding retry logic for enrichment 429 rate-limit errors (currently failed plants stay `pending` silently)
+- [ ] `DEBUG` flag in `config.js` — flip to `false` before distributing to other reviewers

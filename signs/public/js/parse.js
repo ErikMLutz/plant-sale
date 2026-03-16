@@ -126,6 +126,7 @@ function parsePlantsCsv(text) {
       reason_for_review:  row['reason_for_review'] || '',
       description_merged: parseBool(row['description_merged']),
       source,
+      reviewed:           parseBool(row['reviewed']),
     });
   }
   return map;
@@ -228,8 +229,8 @@ function parseSquarespaceRows(rows, csvMap) {
     const tags     = row['Tags']       || '';
     const photo_urls = (row['Hosted Image URLs'] || '').split(/\s+/).map(u => u.trim()).filter(Boolean);
 
-    // Collect all unique tag/category values
-    tags.split(',').map(t => t.trim()).filter(Boolean).forEach(t => allSsTags.add(t));
+    // Collect all unique tag/category values (tags normalized to lowercase to deduplicate)
+    tags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean).forEach(t => allSsTags.add(t));
     category.split(',').map(c => c.trim()).filter(Boolean).forEach(c => allSsCategories.add(c));
 
     // Derive icon fields from Squarespace tags (primary / authoritative source)
@@ -262,10 +263,12 @@ function parseSquarespaceRows(rows, csvMap) {
       }
     }
 
+    const tagsNormalized = tags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean).join(', ');
+
     result.push({
       common:             title,
       category,
-      tags,
+      tags:               tagsNormalized,
       photo_urls,
       ss_description_html,
       description:        match ? (match.description || ss_description_html) : ss_description_html,
@@ -278,6 +281,7 @@ function parseSquarespaceRows(rows, csvMap) {
       reason_for_review,
       description_merged: match ? !!match.description_merged : false,
       source:             match ? (match.source || 'csv') : 'pending',
+      reviewed:           match ? !!match.reviewed : false,
     });
   }
   return result;

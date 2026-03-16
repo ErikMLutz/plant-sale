@@ -237,7 +237,7 @@ async function enrichAllPending(apiKey, limit, onProgress) {
     }
   }
 
-  const CONCURRENCY = 3;
+  const CONCURRENCY = 10;
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, pending.length) }, worker)
   );
@@ -267,14 +267,13 @@ function buildMergePrompt(plant) {
     '== CSV enriched description (may contain useful horticultural data, but may also contradict SS) ==',
     plant.description || '(none)',
     '',
-    'Task: Synthesize a single reconciled HTML description.',
-    '- The Squarespace description is the source of truth for what the plant is and what is being sold.',
-    '- Keep useful horticultural enrichment from the CSV description (size, bloom, soil, native range, USDA zone, deer resistance, highlight).',
-    '- Remove or fix anything in the CSV description that contradicts the Squarespace description or tags.',
-    '- Use this exact HTML format:',
-    '  <ul><li><strong>Label:</strong> value</li>...</ul><p>Highlight sentence 1. Highlight sentence 2.</p>',
-    '- Each <li>: <strong>Label:</strong> value. Each value 6 words or fewer.',
-    '- <p> highlight: two sentences max. First: specific sensory, structural, or unusual trait. Second: ecological or landscape use.',
+    'Task: Produce a corrected version of the CSV description by fixing values that contradict the Squarespace description or tags.',
+    '- START from the CSV description as-is. Do NOT restructure, rename, reorder, split, or merge any <li> labels.',
+    '- Only change a value if it directly contradicts the Squarespace description or tags (e.g. wrong cultivar, wrong size, wrong sun).',
+    '- If the CSV description has no contradiction for a field, copy that <li> exactly as-is.',
+    '- The Squarespace description is the source of truth for what is being sold (cultivar, size, characteristics).',
+    '- Do NOT add new <li> entries. Do NOT remove <li> entries. Keep the same number of bullets in the same order.',
+    '- Keep the same <p> highlight, updating only if it contradicts the Squarespace description.',
     '- Return ONLY the HTML. No explanations, no JSON, no markdown.',
   ];
   return lines.join('\n');
@@ -373,7 +372,7 @@ async function mergeAllUnmerged(apiKey, limit, onProgress) {
     }
   }
 
-  const CONCURRENCY = 3;
+  const CONCURRENCY = 30;
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, toMerge.length) }, worker)
   );
