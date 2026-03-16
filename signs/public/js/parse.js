@@ -1,7 +1,9 @@
 // ─── Parsing utilities ────────────────────────────────────────────────────────
 
 function normalizeName(s) {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+  // Strip apostrophes before general punctuation→space replacement so
+  // "Walker's" and "Walkers" both normalize to "walkers" (not "walker s").
+  return s.toLowerCase().replace(/['']/g, '').replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function stripHtml(html) {
