@@ -230,6 +230,19 @@ button.btn-action:hover { background: #3d7a37; border-color: #3d7a37; }
   line-height: 1.4;
 }
 
+/* ── Current SS description (read-only) ── */
+.ss-desc-content {
+  font-family: Calibri, sans-serif;
+  font-size: 0.9em;
+  color: #444;
+  background: #f7f7f5;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+.ss-desc-content ul { margin: 4px 0; padding-left: 1.2em; }
+.ss-desc-content p  { margin: 4px 0; }
+
 /* ── Quill editor ── */
 #quill-container {
   border: 1px solid #ccc;

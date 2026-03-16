@@ -34,7 +34,7 @@ Defaults: reads `initial_info/email1/2026 plant infosheets/`, writes `~/Download
 4. Computes `flag_for_review` / `reason_for_review` for: BONAP lookup failures, NC native contradictions between infosheet and BONAP, latin names with parentheticals that may not match Squarespace
 
 **Output columns** (new format, loadable by the sign generator app):
-`common, piedmont_native, description, flag_for_review, reason_for_review, description_merged, source`
+`common, latin, piedmont_native, description, flag_for_review, reason_for_review, description_merged, source`
 
 `source` is always `"csv"` for this tool's output. `description_merged` starts as `false`.
 
@@ -43,7 +43,7 @@ Defaults: reads `initial_info/email1/2026 plant infosheets/`, writes `~/Download
 python3 infosheet_converter/migrate_plants_csv.py [INPUT_CSV]
 ```
 Defaults: reads `~/Downloads/upload/plants.improved.csv`, writes `~/Downloads/upload/plants.improved.<YYYYMMDD_HHMMSS>.csv`.
-Converts old `attributes_line` + `highlight_line` → HTML `description` column. Drops `latin`, `sun_levels`, `moisture`, `is_pollinator`, `is_deer_resistant`.
+Converts old `attributes_line` + `highlight_line` → HTML `description` column. Preserves `latin`. Drops `sun_levels`, `moisture`, `is_pollinator`, `is_deer_resistant`.
 
 **Why this exists:** the original `plants.csv` was produced by Ali running AI over the infosheets, which introduced hallucinations (e.g. Amorphophallus konjac marked as "NC native"). This tool extracts data directly from the structured infosheet fields.
 
@@ -129,7 +129,7 @@ Once you've done one review → export → upload-to-SS cycle, you can drop plan
 
 **Source of truth by field:**
 - `description` — plants.csv seeds the Quill editor on first session; after that, SS description is used directly
-- `piedmont_native` — always derived from the `piedmont-native` SS tag (never from plants.csv); confirm via the green checkbox in Step 3 before the first export
+- `piedmont_native` — SS `piedmont-native` tag is authoritative; on first import (before tag exists in SS) the CSV `piedmont_native` value seeds the checkbox so it's pre-checked for review
 - All other PPTX fields (`sun_levels`, `moisture`, `is_pollinator`, `is_deer_resistant`, `common`, `photo_urls`) — always from SS
 
 ---
@@ -138,7 +138,7 @@ Once you've done one review → export → upload-to-SS cycle, you can drop plan
 
 **Step 1 — Upload**
 - User uploads a single **`plant-sale-signs-data.*.zip`** file
-- `readZipFile()` (zip.js) extracts: the SS inventory TSV + all `plants.improved.*.csv` files; picks the latest CSV by filename timestamp
+- `readZipFile()` (zip.js) extracts: the SS inventory (any filename not matching `plants.improved.*.csv`) + all `plants.improved.*.csv` files; picks the latest CSV by filename timestamp
 - All files in the zip are preserved in memory (`zipOldCsvFiles`) and re-bundled into the download zip
 - The coordinator creates the initial zip from `~/Downloads/upload/` using the shell
 
@@ -155,7 +155,8 @@ Once you've done one review → export → upload-to-SS cycle, you can drop plan
 - **Default sort order**: needs enrichment → needs merging (csv + !description_merged) → potential issue (flag_for_review) → unreviewed → reviewed
 - **Nav bar**: ← Prev | Plant N of M | ⚪ Unreviewed/✅ Reviewed badge | Source badge | 🟤 Needs merging badge (when not merged) | ⚠ Potential issue badge | plant name | Next →
 - **Plant detail**: photo (left, loads async with grey placeholder during load) + content column (right)
-- **Content column** (top to bottom): action buttons → flag/reason row → Quill WYSIWYG editor → tags checkboxes → categories checkboxes
+- **Content column** (top to bottom): action buttons → flag/reason row → current SS description (read-only) → Quill WYSIWYG editor → tags checkboxes → categories checkboxes
+- **SS description preview**: read-only render of `plant.ss_description_html` shown above the editor so reviewers can compare what's in SS vs what will be exported; hidden if no SS description
 - **Quill editor**: snow theme, toolbar: bold / italic / bullet list; `setQuillContent(html)` / `readQuillHtml()` are the canonical read/write functions; `setQuillContent` uses `quill.clipboard.convert({ html })` + `quill.setContents(delta, 'silent')` to avoid scroll jumps and spurious text-change events; description flushed to plant object on every text-change and on navigate (but NOT on first load — see `idx !== currentPlantIdx` guard in `navigateTo`)
 - **Mark Reviewed**: toggles `plant.reviewed`; also clears `flag_for_review` and `reason_for_review` when marking reviewed. Does NOT re-sort the list. Button styled via `updateMarkReviewedBtn` — `btn-action` (green fill) when unreviewed, `secondary` when already reviewed
 - **Tags/Categories**: pill-style checkboxes, fixed 160px width so they align in columns; tags are normalized to lowercase at parse time (Squarespace treats `Sun` and `sun` identically); `piedmont-native` tag and `/piedmont-native` category are always pre-populated (even before they exist in SS) and styled green; checking either one syncs `plant.piedmont_native`, `plant.tags`, and `plant.category` together
@@ -164,7 +165,7 @@ Once you've done one review → export → upload-to-SS cycle, you can drop plan
 **Step 4 — Download**
 - **Download review zip**: calls `downloadZip(csvText)` — creates new zip with SS inventory + all prior CSVs + new `plants.improved.<datetime>.csv`
 - **Generate PPTX**: fetches photos, builds PowerPoint
-- **Download updated SS inventory**: exports original SS TSV with updated Description/Tags/Categories
+- **Download updated SS inventory**: exports SS inventory as **CSV** (RFC 4180) with updated Description/Tags/Categories; runs `validateSsInventory()` first — blocks download and alerts if any column other than Description/Tags/Categories changed vs the original
 
 #### Key data structures
 
@@ -175,10 +176,12 @@ Once you've done one review → export → upload-to-SS cycle, you can drop plan
   common, category, tags, photo_urls,
   // Description — HTML; starts as plants.csv description (or SS description if no CSV match)
   description,
-  // Original SS description HTML — preserved for merge prompt input only
+  // Original SS description HTML — shown read-only above editor; input to merge prompt
   ss_description_html,
   // From plants.csv (or derived)
-  piedmont_native, flag_for_review, reason_for_review, description_merged,
+  latin,              // latin/scientific name from CSV; used for SS title matching
+  piedmont_native,    // SS tag authoritative; CSV seeds value before first SS upload
+  flag_for_review, reason_for_review, description_merged,
   reviewed,   // boolean — set true by "Mark Reviewed"; persisted in plants.csv
   // Derived from SS tags (authoritative)
   sun_levels, moisture, is_pollinator, is_deer_resistant,
@@ -211,17 +214,23 @@ let zipOldCsvFiles = [];     // [{name, content}] all plants.improved.*.csv from
 - "Download updated SS inventory" adds `piedmont-native` tag and `/piedmont-native` category to any plant with `piedmont_native: true` in CSV; also reads `piedmont-native` tag back from SS on re-import via `inferFromSsTags`
 
 #### `plants.csv` format
-- **Current format**: `common, piedmont_native, description, flag_for_review, reason_for_review, description_merged, source, reviewed`
+- **Current format**: `common, latin, piedmont_native, description, flag_for_review, reason_for_review, description_merged, source, reviewed`
+  - `latin` — latin/scientific name; used as the primary match key against SS titles
   - `description` is HTML: `<ul><li><strong>Label:</strong> value</li>...</ul><p>Highlight.</p>`
   - `description_merged` is `true` after AI merge reconciliation
   - `reviewed` is `true` after user clicks "Mark Reviewed"
   - `source` values: `csv` | `ai_enriched` | `manually_enriched` (pending plants are NOT written to CSV)
 - **Old format** (backward compat — auto-detected by presence of `attributes_line`): `common, attributes_line, highlight_line, ...` — auto-converted to HTML description on load
-- Matched to Squarespace by normalized common name (lowercase, alphanumeric only)
+- **Matching to Squarespace** (`findCsvMatch`): tries in order:
+  1. Latin name contained in SS title (handles `"Genus species (Common name)"` format)
+  2. Exact normalized common name
+  3. SS title contains CSV common name (or starts with it)
+  4. CSV common name contains SS title (or starts with it)
+- **Name normalization** (`normalizeName`): lowercase, apostrophes stripped (so `Walker's` = `Walkers`), remaining non-alphanumeric → space, collapse whitespace
 - **CSV round-trip**: HTML stored as a double-quoted RFC 4180 field; `parseCsvLine` handles quotes and commas inside HTML correctly; `&nbsp;` stripped from Quill output via `.replace(/&nbsp;/g, ' ')` before storing
 
 #### Zip file format
-- Contains: SS inventory TSV (any name not matching `plants.improved.*.csv`) + one or more `plants.improved.<YYYYMMDD_HHMMSS>.csv` files
+- Contains: SS inventory file (any name not matching `plants.improved.*.csv` — can be TSV or CSV) + one or more `plants.improved.<YYYYMMDD_HHMMSS>.csv` files
 - On upload: latest CSV (by filename sort) is used; all CSVs preserved for re-bundling
 - On download: new CSV added; all prior CSVs retained; named `plant-sale-signs-data.<datetime>.zip`
 - **Do not modify zip contents manually** — pass as-is between reviewers
