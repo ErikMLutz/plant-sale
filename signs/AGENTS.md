@@ -117,6 +117,23 @@ public/
 
 Scripts load in dependency order: `config.js → parse.js → images.js → pptx.js → enrich.js → zip.js → app.js`. All globals shared across files (no modules).
 
+#### Intended data flow (long-term architecture)
+
+The app is designed so that **plants.csv is eventually not needed**. The intended cycle is:
+
+1. **Upload** SS inventory + plants.csv zip → plants.csv seeds descriptions and flags for review
+2. **Review** (Step 3) → shape what the updated SS inventory should look like: edit descriptions, confirm `piedmont-native` tag, fix tags/categories
+3. **Download** (Step 4) → PPTX and updated SS inventory are both built from the reviewed plant objects, not from plants.csv directly
+
+Once you've done one review → export → upload-to-SS cycle, you can drop plants.csv entirely: just upload the SS inventory and download a PPTX.
+
+**Source of truth by field:**
+- `description` — plants.csv seeds the Quill editor on first session; after that, SS description is used directly
+- `piedmont_native` — always derived from the `piedmont-native` SS tag (never from plants.csv); confirm via the green checkbox in Step 3 before the first export
+- All other PPTX fields (`sun_levels`, `moisture`, `is_pollinator`, `is_deer_resistant`, `common`, `photo_urls`) — always from SS
+
+---
+
 #### App flow
 
 **Step 1 — Upload**

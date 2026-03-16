@@ -277,7 +277,7 @@ function parseSquarespaceRows(rows, csvMap) {
       moisture:           ss.moisture,
       is_pollinator:      ss.is_pollinator,
       is_deer_resistant:  ss.is_deer_resistant,
-      piedmont_native:    match ? !!match.piedmont_native : ss.piedmont_native,
+      piedmont_native:    ss.piedmont_native,
       flag_for_review,
       reason_for_review,
       description_merged: match ? !!match.description_merged : false,
