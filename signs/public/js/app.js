@@ -449,6 +449,17 @@ function navigateTo(idx) {
     });
   }
 
+  // SS description (read-only preview)
+  const ssDescBlock   = document.getElementById('ss-desc-block');
+  const ssDescContent = document.getElementById('ss-desc-content');
+  if (plant.ss_description_html) {
+    ssDescBlock.style.display = '';
+    ssDescContent.innerHTML = plant.ss_description_html;
+  } else {
+    ssDescBlock.style.display = 'none';
+    ssDescContent.innerHTML = '';
+  }
+
   // Flag row
   const flagRow = document.getElementById('review-flag-row');
   if (plant.flag_for_review && plant.reason_for_review) {
@@ -833,7 +844,7 @@ function downloadEnrichedCsvText() {
   }
 
   const headers = [
-    'common', 'piedmont_native', 'description',
+    'common', 'latin', 'piedmont_native', 'description',
     'flag_for_review', 'reason_for_review', 'description_merged', 'source', 'reviewed',
   ];
   const rows = [headers.join(',')];
@@ -841,6 +852,7 @@ function downloadEnrichedCsvText() {
     if (p.source === 'pending') continue;  // no enriched data to persist; SS is source of truth
     rows.push([
       csvEscape(p.common),
+      csvEscape(p.latin || ''),
       csvEscape(p.piedmont_native || false),
       csvEscape(p.description || ''),
       csvEscape(p.flag_for_review || false),

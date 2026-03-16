@@ -94,7 +94,8 @@ function attributesLineToHtml(attributesLine, highlightLine) {
  * auto-converts them to HTML description on load so old CSVs still work.
  */
 function parsePlantsCsv(text) {
-  const map = new Map();
+  const map = new Map();       // keyed by normalized common name
+  const byLatin = new Map();   // keyed by normalized latin name (genus species)
   const rows = parseDelimited(text);
   if (rows.length === 0) return map;
 
@@ -114,12 +115,12 @@ function parsePlantsCsv(text) {
       description = row['description'] || '';
     }
 
-    // Preserve enrichment source type if present, otherwise default to 'csv'
     const rawSource = row['source'] || '';
     const source = ['ai_enriched', 'manually_enriched'].includes(rawSource) ? rawSource : 'csv';
 
-    map.set(normalizeName(common), {
+    const entry = {
       common,
+      latin:              row['latin'] || '',
       description,
       piedmont_native:    parseBool(row['piedmont_native']),
       flag_for_review:    parseBool(row['flag_for_review']),
@@ -127,8 +128,14 @@ function parsePlantsCsv(text) {
       description_merged: parseBool(row['description_merged']),
       source,
       reviewed:           parseBool(row['reviewed']),
-    });
+    };
+
+    map.set(normalizeName(common), entry);
+    if (entry.latin) byLatin.set(normalizeName(entry.latin), entry);
   }
+
+  // Attach latin index as a property so callers don't need a new signature
+  map.byLatin = byLatin;
   return map;
 }
 
@@ -173,17 +180,37 @@ function inferFromSsTags(category, tags) {
 
 /**
  * Find the best match for a Squarespace title in the plants.csv map.
- * Tries: exact normalized match, then partial containment in either direction.
+ *
+ * Match order (first hit wins):
+ *  1. Latin name (case-insensitive) contained in SS title — handles the
+ *     "Genus species (Common name)" SS title format for native plants.
+ *  2. Exact normalized common-name match.
+ *  3. SS title contains (or starts with) the CSV common name.
+ *  4. CSV common name contains (or starts with) the SS title.
  */
 function findCsvMatch(title, csvMap) {
   const normTitle = normalizeName(title);
+
+  // 1. Latin name in SS title
+  if (csvMap.byLatin) {
+    for (const [latinKey, entry] of csvMap.byLatin) {
+      if (normTitle.includes(latinKey)) return entry;
+    }
+  }
+
+  // 2. Exact common-name match
   if (csvMap.has(normTitle)) return csvMap.get(normTitle);
+
+  // 3. SS title contains the CSV common name
   for (const [key, entry] of csvMap) {
     if (normTitle.startsWith(key) || normTitle.includes(key)) return entry;
   }
+
+  // 4. CSV common name contains the SS title
   for (const [key, entry] of csvMap) {
     if (key.startsWith(normTitle) || key.includes(normTitle)) return entry;
   }
+
   return null;
 }
 
