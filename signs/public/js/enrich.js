@@ -41,12 +41,27 @@ function unwrapJson(text) {
 }
 
 /**
+ * Derive NC native label from SS tags/categories.
+ * Returns 'NC Piedmont Native', 'NC Native', or null.
+ */
+function ncNativeLabel(plant) {
+  const combined = ((plant.tags || '') + ',' + (plant.category || '')).toLowerCase();
+  const tokens   = combined.split(/[,/]/).map(t => t.trim()).filter(Boolean);
+  const hasPiedmont = tokens.includes('piedmont-native') || !!plant.piedmont_native;
+  const hasNative   = tokens.some(t => t === 'native');
+  if (hasPiedmont) return 'NC Piedmont Native';
+  if (hasNative)   return 'NC Native';
+  return null;
+}
+
+/**
  * Build the prompt for gpt-4o with web search.
  * Instructs the model to web search within approved domains only.
  * Returns a JSON object with description (HTML), sun_levels (array),
  * moisture, is_pollinator, is_deer_resistant, piedmont_native.
  */
 function buildPrompt(plant) {
+  const ncLabel = ncNativeLabel(plant);
   const lines = [
     'You are a botanist filling in plant sale sign data. Search the web and return only valid JSON with no markdown or code fences.',
     '',
@@ -82,7 +97,7 @@ function buildPrompt(plant) {
       '- Bloom color: color + season ONLY — no form descriptors. Allowed colors: white, lavender, purple, pink, red, orange, yellow, blue, green. Two most prominent separated by "/" if multiple (e.g. "white/yellow").',
       '- Bloom season: Spring / early Summer / mid Summer / late Summer / early Fall / Fall. "mid-late Summer" is also valid.',
       '- Soil: texture/drainage first, then notable tolerance if applicable. 6 words or fewer.',
-      '- Native range: "North America, NC native" only if botanically native to NC. "North America" if continental but not NC. "Asia", "Europe", etc. Never list US states.',
+      `- Native range: continent/region of origin${ncLabel ? `, then append ", ${ncLabel}"` : ' only — no NC suffix'}. Never list US states. Examples: "North America${ncLabel ? `, ${ncLabel}` : ''}", "Asia", "Europe".`,
       '- USDA zone: numeric range only, e.g. "4-8".',
       '- Deer Resistance: exactly "yes", "moderate", or "no".',
       '- <p> highlight: two sentences max. First: specific sensory, structural, or unusual trait. Second: wildlife value, ecological role, or landscape use. Name host species when known.',
@@ -253,27 +268,45 @@ async function enrichAllPending(apiKey, limit, onProgress) {
  * that contradicts SS data; keep useful enrichment from CSV; use same HTML format.
  * Returns only raw HTML (no JSON wrapper).
  */
-function buildMergePrompt(plant) {
+function buildMergePrompt(plant, ncsuData) {
+  const ncLabel = ncNativeLabel(plant);
+  const ncsuLines = [];
+  if (ncsuData && (ncsuData.distribution || ncsuData.origin)) {
+    ncsuLines.push('== NCSU Toolbox data (authoritative for native range) ==');
+    if (ncsuData.distribution) ncsuLines.push(`Distribution: ${ncsuData.distribution}`);
+    if (ncsuData.origin)       ncsuLines.push(`Country or Region of Origin: ${ncsuData.origin}`);
+    ncsuLines.push('');
+  }
+
   const lines = [
-    'You are a botanist reconciling plant sale sign descriptions. Return only the final HTML — no JSON, no markdown, no code fences.',
+    'You are a botanist fact-checking a plant sale sign description. Return only the final HTML — no JSON, no markdown, no code fences.',
     '',
     `Plant common name: ${plant.common}`,
     `Squarespace tags: ${plant.tags || '(none)'}`,
     `Squarespace categories: ${plant.category || '(none)'}`,
     '',
-    '== Squarespace description (authoritative — reflects what is actually sold) ==',
+    '== Squarespace description (reference only — use to catch factual errors in the CSV description) ==',
     plant.ss_description_html || '(none)',
     '',
-    '== CSV enriched description (may contain useful horticultural data, but may also contradict SS) ==',
+    ...ncsuLines,
+    '== CSV description (YOUR BASE — output must be this text with minimal targeted corrections) ==',
     plant.description || '(none)',
     '',
-    'Task: Produce a corrected version of the CSV description by fixing values that contradict the Squarespace description or tags.',
-    '- START from the CSV description as-is. Do NOT restructure, rename, reorder, split, or merge any <li> labels.',
-    '- Only change a value if it directly contradicts the Squarespace description or tags (e.g. wrong cultivar, wrong size, wrong sun).',
-    '- If the CSV description has no contradiction for a field, copy that <li> exactly as-is.',
-    '- The Squarespace description is the source of truth for what is being sold (cultivar, size, characteristics).',
+    'Task: Output the CSV description with only the minimum corrections needed to fix factual errors.',
+    '',
+    'RULES:',
+    '- Your output must be nearly identical to the CSV description. Preserve all wording, structure, and flavor text.',
+
+    '- Squarespace often uses shorthand without labels — translate it to identify the attribute it references before applying the rules below:',
+    '  · A bare dimension like "2x2\'", "3-4 ft tall", "18in wide" → this is the Size, even if the word "Size" never appears.',
+    '  · A color word near a season like "yellow, summer" → this is the Bloom color/season.',
+    '- For each <li>: keep the CSV value as-is, EXCEPT in these two cases:',
+    '  1. CORRECT: the CSV states a fact that Squarespace contradicts (e.g. CSV Size says "1-3 ft tall x 1-2 ft wide", SS says "2x2\'" → correct Size to "2 ft tall x 2 ft wide"; CSV Bloom says "white", SS says "yellow" → use "yellow").',
+    '  2. ENRICH: Squarespace gives a more specific version of something CSV mentions (e.g. CSV says "summer blooms", SS says "yellow summer blooms" → use "yellow summer blooms"). Only add detail about the same attribute.',
+    '- Do NOT replace a CSV value with a Squarespace value just because wording differs. Only apply changes that fall under CORRECT or ENRICH above.',
     '- Do NOT add new <li> entries. Do NOT remove <li> entries. Keep the same number of bullets in the same order.',
-    '- Keep the same <p> highlight, updating only if it contradicts the Squarespace description.',
+    '- Preserve the <p> highlight paragraph from CSV exactly unless it contains a direct factual error contradicted by Squarespace.',
+    `- Native range: use NCSU Toolbox data if provided to fill/correct the origin. Then${ncLabel ? ` append ", ${ncLabel}"` : ' do not append any NC suffix — this plant has neither native nor piedmont-native tag'}.`,
     '- Return ONLY the HTML. No explanations, no JSON, no markdown.',
   ];
   return lines.join('\n');
@@ -285,7 +318,8 @@ function buildMergePrompt(plant) {
  * Returns raw HTML string.
  */
 async function callOpenAIMerge(plant, apiKey) {
-  const prompt = buildMergePrompt(plant);
+  const ncsuData = await fetchNcsuDistribution(plant.latin || plant.common).catch(() => null);
+  const prompt = buildMergePrompt(plant, ncsuData);
 
   console.groupCollapsed(`[merge] ▶ ${plant.common} — sending merge prompt`);
   console.log('prompt:', prompt);

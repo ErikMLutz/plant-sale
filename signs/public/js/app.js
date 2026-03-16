@@ -6,6 +6,50 @@ let quill             = null;
 let searchQuery       = '';
 let suppressTextChange = false;  // true while setQuillContent is running
 
+// ─── NCSU Toolbox ─────────────────────────────────────────────────────────────
+
+const ncsuCache = new Map(); // latin name → distribution string (or null if not found)
+
+// Returns { distribution, origin } (either may be null). Returns null on fetch failure.
+async function fetchNcsuDistribution(latin) {
+  if (!latin) return null;
+  // Strip parenthetical common name and cultivar: "Solidago rugosa 'Fireworks'" → "Solidago rugosa"
+  const clean = latin.replace(/\s*\([^)]*\)/g, '').replace(/\s*'[^']*'/g, '').trim();
+  if (!clean) return null;
+  if (ncsuCache.has(clean)) return ncsuCache.get(clean);
+
+  const slug = clean.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+  const url  = `https://plants.ces.ncsu.edu/plants/${slug}/`;
+
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) { ncsuCache.set(clean, null); return null; }
+    const html = await resp.text();
+    const doc  = new DOMParser().parseFromString(html, 'text/html');
+
+    function dtValue(label) {
+      for (const dt of doc.querySelectorAll('dt')) {
+        if (dt.textContent.trim() === label) {
+          const dd   = dt.nextElementSibling;
+          const span = dd && dd.querySelector('.detail_display_attribute');
+          return (span ? span.textContent.trim() : (dd ? dd.textContent.trim() : null)) || null;
+        }
+      }
+      return null;
+    }
+
+    const result = {
+      distribution: dtValue('Distribution:'),
+      origin:       dtValue('Country Or Region Of Origin:'),
+    };
+    ncsuCache.set(clean, result);
+    return result;
+  } catch (_) {
+    ncsuCache.set(clean, null);
+    return null;
+  }
+}
+
 // ─── API key helpers ──────────────────────────────────────────────────────────
 
 function syncRowEnrichBtns() {
@@ -450,15 +494,25 @@ function navigateTo(idx) {
   }
 
   // SS description (read-only preview)
-  const ssDescBlock   = document.getElementById('ss-desc-block');
   const ssDescContent = document.getElementById('ss-desc-content');
-  if (plant.ss_description_html) {
-    ssDescBlock.style.display = '';
-    ssDescContent.innerHTML = plant.ss_description_html;
-  } else {
-    ssDescBlock.style.display = 'none';
-    ssDescContent.innerHTML = '';
-  }
+  ssDescContent.innerHTML = plant.ss_description_html
+    || '<em style="color:#aaa">No SS description yet</em>';
+
+  // NCSU Toolbox Distribution (async, cached)
+  const ncsuEl = document.getElementById('ncsu-dist-content');
+  ncsuEl.textContent = 'Loading…';
+  fetchNcsuDistribution(plant.latin || plant.common).then(data => {
+    if (sortedPlantsCache[currentPlantIdx] !== plant) return;
+    if (!data || (!data.distribution && !data.origin)) {
+      ncsuEl.textContent = 'Not found on NCSU Toolbox';
+      return;
+    }
+    const parts = [];
+    if (data.distribution) parts.push(`Distribution: ${data.distribution}`);
+    if (data.origin)       parts.push(`Origin: ${data.origin}`);
+    ncsuEl.textContent = parts.join('\n');
+    ncsuEl.style.whiteSpace = 'pre-line';
+  });
 
   // Flag row
   const flagRow = document.getElementById('review-flag-row');
@@ -846,6 +900,7 @@ function downloadEnrichedCsvText() {
   const headers = [
     'common', 'latin', 'piedmont_native', 'description',
     'flag_for_review', 'reason_for_review', 'description_merged', 'source', 'reviewed',
+    'tags', 'category',
   ];
   const rows = [headers.join(',')];
   for (const p of plants) {
@@ -860,6 +915,8 @@ function downloadEnrichedCsvText() {
       csvEscape(p.description_merged || false),
       csvEscape(p.source),
       csvEscape(p.reviewed || false),
+      csvEscape(p.tags !== p.ss_tags_original         ? (p.tags     || '') : ''),
+      csvEscape(p.category !== p.ss_category_original ? (p.category || '') : ''),
     ].join(','));
   }
   return rows.join('\n');

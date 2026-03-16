@@ -230,6 +230,18 @@ button.btn-action:hover { background: #3d7a37; border-color: #3d7a37; }
   line-height: 1.4;
 }
 
+/* ── SS description + NCSU Distribution side-by-side ── */
+#ss-ncsu-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+#ss-desc-block,
+#ncsu-dist-block {
+  flex: 1;
+  min-width: 0;
+}
+
 /* ── Current SS description (read-only) ── */
 .ss-desc-content {
   font-family: Calibri, sans-serif;

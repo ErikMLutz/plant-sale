@@ -6,6 +6,13 @@ function normalizeName(s) {
   return s.toLowerCase().replace(/['']/g, '').replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+/** Normalize a single tag string: lowercase, canonicalize known aliases. */
+function normalizeTag(t) {
+  t = t.trim().toLowerCase();
+  if (t === 'part shade' || t === 'part sun') return 'part-shade';
+  return t;
+}
+
 function stripHtml(html) {
   const div = document.createElement('div');
   div.innerHTML = html;
@@ -130,6 +137,8 @@ function parsePlantsCsv(text) {
       description_merged: parseBool(row['description_merged']),
       source,
       reviewed:           parseBool(row['reviewed']),
+      tags:               row['tags']     || '',
+      category:           row['category'] || '',
     };
 
     map.set(normalizeName(common), entry);
@@ -266,10 +275,6 @@ function parseSquarespaceRows(rows, csvMap, allRows) {
     const tags     = row['Tags']       || '';
     const photo_urls = (row['Hosted Image URLs'] || '').split(/\s+/).map(u => u.trim()).filter(Boolean);
 
-    // Collect all unique tag/category values (tags normalized to lowercase to deduplicate)
-    tags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean).forEach(t => allSsTags.add(t));
-    category.split(',').map(c => c.trim()).filter(Boolean).forEach(c => allSsCategories.add(c));
-
     // Derive icon fields from Squarespace tags (primary / authoritative source)
     const ss = inferFromSsTags(category, tags);
 
@@ -300,25 +305,38 @@ function parseSquarespaceRows(rows, csvMap, allRows) {
       }
     }
 
-    const tagsNormalized = tags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean).join(', ');
+    // Normalize SS tags/categories as the SS baseline (dedup aliases like part shade → part-shade)
+    const tagsNormalized     = tags.split(',').map(normalizeTag).filter(Boolean).join(', ');
+    const categoryNormalized = category.split(',').map(c => c.trim()).filter(Boolean).join(', ');
+
+    // If CSV has saved tags/category, use those (allows deletions); otherwise use SS
+    const finalTags     = (match && match.tags)     ? match.tags     : tagsNormalized;
+    const finalCategory = (match && match.category) ? match.category : categoryNormalized;
+
+    // Collect all unique tag/category values for checkbox rendering
+    finalTags.split(',').map(t => t.trim()).filter(Boolean).forEach(t => allSsTags.add(t));
+    finalCategory.split(',').map(c => c.trim()).filter(Boolean).forEach(c => allSsCategories.add(c));
 
     result.push({
-      common:             title,
-      category,
-      tags:               tagsNormalized,
+      common:               title,
+      latin:                match ? (match.latin || '') : '',
+      ss_tags_original:     tagsNormalized,
+      ss_category_original: categoryNormalized,
+      category:             finalCategory,
+      tags:                 finalTags,
       photo_urls,
       ss_description_html,
-      description:        match ? (match.description || ss_description_html) : ss_description_html,
-      sun_levels:         ss.sun_levels,
-      moisture:           ss.moisture,
-      is_pollinator:      ss.is_pollinator,
-      is_deer_resistant:  ss.is_deer_resistant,
-      piedmont_native:    ss.piedmont_native || (match ? !!match.piedmont_native : false),
+      description:          match ? (match.description || ss_description_html) : ss_description_html,
+      sun_levels:           ss.sun_levels,
+      moisture:             ss.moisture,
+      is_pollinator:        ss.is_pollinator,
+      is_deer_resistant:    ss.is_deer_resistant,
+      piedmont_native:      ss.piedmont_native || (match ? !!match.piedmont_native : false),
       flag_for_review,
       reason_for_review,
-      description_merged: match ? !!match.description_merged : false,
-      source:             match ? (match.source || 'csv') : 'pending',
-      reviewed:           match ? !!match.reviewed : false,
+      description_merged:   match ? !!match.description_merged : false,
+      source:               match ? (match.source || 'csv') : 'pending',
+      reviewed:             match ? !!match.reviewed : false,
     });
   }
   // Always include piedmont entries so they appear in the review panel before they're in SS
