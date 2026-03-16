@@ -166,8 +166,9 @@ function inferFromSsTags(category, tags) {
 
   const is_pollinator     = tokens.has('pollinator');
   const is_deer_resistant = tokens.has('deer');
+  const piedmont_native   = tokens.has('piedmont-native');
 
-  return { sun_levels, moisture, moistureConflict, is_pollinator, is_deer_resistant };
+  return { sun_levels, moisture, moistureConflict, is_pollinator, is_deer_resistant, piedmont_native };
 }
 
 /**
@@ -276,7 +277,7 @@ function parseSquarespaceRows(rows, csvMap) {
       moisture:           ss.moisture,
       is_pollinator:      ss.is_pollinator,
       is_deer_resistant:  ss.is_deer_resistant,
-      piedmont_native:    match ? !!match.piedmont_native : false,
+      piedmont_native:    match ? !!match.piedmont_native : ss.piedmont_native,
       flag_for_review,
       reason_for_review,
       description_merged: match ? !!match.description_merged : false,
@@ -284,5 +285,8 @@ function parseSquarespaceRows(rows, csvMap) {
       reviewed:           match ? !!match.reviewed : false,
     });
   }
+  // Always include piedmont entries so they appear in the review panel before they're in SS
+  allSsTags.add('piedmont-native');
+  allSsCategories.add('/piedmont-native');
   return result;
 }

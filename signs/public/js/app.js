@@ -466,18 +466,33 @@ function navigateTo(idx) {
   tagsLabel.textContent = 'Tags:';
   tagsEl.appendChild(tagsLabel);
   const currentTags = new Set((plant.tags || '').split(',').map(t => t.trim()).filter(Boolean));
+  let piedmontTagCb = null;
+  let piedmontCatCb = null;
   Array.from(allSsTags).sort().forEach(tagVal => {
+    const isPiedmont = tagVal === 'piedmont-native';
     const row = document.createElement('label');
-    row.className = 'icon-check-row';
+    row.className = 'icon-check-row' + (isPiedmont ? ' icon-check-row--piedmont' : '');
     const cb = document.createElement('input');
     cb.type    = 'checkbox';
-    cb.checked = currentTags.has(tagVal);
+    cb.checked = isPiedmont ? !!plant.piedmont_native : currentTags.has(tagVal);
     cb.addEventListener('change', () => {
-      const tagSet = new Set((plant.tags || '').split(',').map(t => t.trim()).filter(Boolean));
-      if (cb.checked) tagSet.add(tagVal); else tagSet.delete(tagVal);
-      plant.tags = Array.from(tagSet).join(', ');
+      if (isPiedmont) {
+        plant.piedmont_native = cb.checked;
+        if (piedmontCatCb) piedmontCatCb.checked = cb.checked;
+        const tagSet = new Set((plant.tags || '').split(',').map(t => t.trim()).filter(Boolean));
+        if (cb.checked) tagSet.add('piedmont-native'); else tagSet.delete('piedmont-native');
+        plant.tags = Array.from(tagSet).join(', ');
+        const catSet = new Set((plant.category || '').split(',').map(c => c.trim()).filter(Boolean));
+        if (cb.checked) catSet.add('/piedmont-native'); else catSet.delete('/piedmont-native');
+        plant.category = Array.from(catSet).join(', ');
+      } else {
+        const tagSet = new Set((plant.tags || '').split(',').map(t => t.trim()).filter(Boolean));
+        if (cb.checked) tagSet.add(tagVal); else tagSet.delete(tagVal);
+        plant.tags = Array.from(tagSet).join(', ');
+      }
       if (plant.source !== 'pending') plant.source = 'manually_enriched';
     });
+    if (isPiedmont) piedmontTagCb = cb;
     row.appendChild(cb);
     row.append(' ' + tagVal);
     tagsEl.appendChild(row);
@@ -492,17 +507,30 @@ function navigateTo(idx) {
   catsEl.appendChild(catsLabel);
   const currentCats = new Set((plant.category || '').split(',').map(c => c.trim()).filter(Boolean));
   Array.from(allSsCategories).sort().forEach(catVal => {
+    const isPiedmont = catVal === '/piedmont-native';
     const row = document.createElement('label');
-    row.className = 'icon-check-row';
+    row.className = 'icon-check-row' + (isPiedmont ? ' icon-check-row--piedmont' : '');
     const cb = document.createElement('input');
     cb.type    = 'checkbox';
-    cb.checked = currentCats.has(catVal);
+    cb.checked = isPiedmont ? !!plant.piedmont_native : currentCats.has(catVal);
     cb.addEventListener('change', () => {
-      const catSet = new Set((plant.category || '').split(',').map(c => c.trim()).filter(Boolean));
-      if (cb.checked) catSet.add(catVal); else catSet.delete(catVal);
-      plant.category = Array.from(catSet).join(', ');
+      if (isPiedmont) {
+        plant.piedmont_native = cb.checked;
+        if (piedmontTagCb) piedmontTagCb.checked = cb.checked;
+        const catSet = new Set((plant.category || '').split(',').map(c => c.trim()).filter(Boolean));
+        if (cb.checked) catSet.add('/piedmont-native'); else catSet.delete('/piedmont-native');
+        plant.category = Array.from(catSet).join(', ');
+        const tagSet = new Set((plant.tags || '').split(',').map(t => t.trim()).filter(Boolean));
+        if (cb.checked) tagSet.add('piedmont-native'); else tagSet.delete('piedmont-native');
+        plant.tags = Array.from(tagSet).join(', ');
+      } else {
+        const catSet = new Set((plant.category || '').split(',').map(c => c.trim()).filter(Boolean));
+        if (cb.checked) catSet.add(catVal); else catSet.delete(catVal);
+        plant.category = Array.from(catSet).join(', ');
+      }
       if (plant.source !== 'pending') plant.source = 'manually_enriched';
     });
+    if (isPiedmont) piedmontCatCb = cb;
     row.appendChild(cb);
     row.append(' ' + catVal);
     catsEl.appendChild(row);
@@ -850,15 +878,15 @@ function downloadUpdatedSsInventory() {
   function buildTags(plant, originalTags) {
     const tagParts = (plant.tags || originalTags || '').split(',').map(t => t.trim()).filter(Boolean);
     if (plant.piedmont_native && !tagParts.some(t => t.toLowerCase().includes('piedmont-native'))) {
-      tagParts.push('/piedmont-native');
+      tagParts.push('piedmont-native');
     }
     return tagParts.join(', ');
   }
 
   function buildCategories(plant, originalCats) {
     const catParts = (plant.category || originalCats || '').split(',').map(c => c.trim()).filter(Boolean);
-    if (plant.piedmont_native && !catParts.some(c => c.toLowerCase().includes('piedmont native'))) {
-      catParts.push('Piedmont Native');
+    if (plant.piedmont_native && !catParts.some(c => c.toLowerCase().includes('piedmont-native'))) {
+      catParts.push('/piedmont-native');
     }
     return catParts.join(', ');
   }

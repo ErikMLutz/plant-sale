@@ -141,7 +141,7 @@ Scripts load in dependency order: `config.js → parse.js → images.js → pptx
 - **Content column** (top to bottom): action buttons → flag/reason row → Quill WYSIWYG editor → tags checkboxes → categories checkboxes
 - **Quill editor**: snow theme, toolbar: bold / italic / bullet list; `setQuillContent(html)` / `readQuillHtml()` are the canonical read/write functions; `setQuillContent` uses `quill.clipboard.convert({ html })` + `quill.setContents(delta, 'silent')` to avoid scroll jumps and spurious text-change events; description flushed to plant object on every text-change and on navigate (but NOT on first load — see `idx !== currentPlantIdx` guard in `navigateTo`)
 - **Mark Reviewed**: toggles `plant.reviewed`; also clears `flag_for_review` and `reason_for_review` when marking reviewed. Does NOT re-sort the list. Button styled via `updateMarkReviewedBtn` — `btn-action` (green fill) when unreviewed, `secondary` when already reviewed
-- **Tags/Categories**: pill-style checkboxes, fixed 160px width so they align in columns; tags are normalized to lowercase at parse time (Squarespace treats `Sun` and `sun` identically)
+- **Tags/Categories**: pill-style checkboxes, fixed 160px width so they align in columns; tags are normalized to lowercase at parse time (Squarespace treats `Sun` and `sun` identically); `piedmont-native` tag and `/piedmont-native` category are always pre-populated (even before they exist in SS) and styled green; checking either one syncs `plant.piedmont_native`, `plant.tags`, and `plant.category` together
 - **Button classes**: `btn-action` = green fill, small size (same as `secondary` but filled); used for Mark Reviewed and Download review zip
 
 **Step 4 — Download**
@@ -190,7 +190,8 @@ let zipOldCsvFiles = [];     // [{name, content}] all plants.improved.*.csv from
 - Key columns: `Title`, `Description` (HTML), `Categories`, `Tags`, `Hosted Image URLs` (space-separated)
 - Photos are publicly accessible Squarespace CDN URLs, served as **WebP** — must be converted to JPEG before embedding in PPTX
 - Raw rows stored in global `rawSsRows` for the "Download updated SS inventory" function
-- All unique tag/category values collected into globals `allSsTags`, `allSsCategories` for checkbox rendering
+- All unique tag/category values collected into globals `allSsTags`, `allSsCategories` for checkbox rendering; `piedmont-native` and `/piedmont-native` are always injected after parsing so they appear in the review panel before SS has them
+- "Download updated SS inventory" adds `piedmont-native` tag and `/piedmont-native` category to any plant with `piedmont_native: true` in CSV; also reads `piedmont-native` tag back from SS on re-import via `inferFromSsTags`
 
 #### `plants.csv` format
 - **Current format**: `common, piedmont_native, description, flag_for_review, reason_for_review, description_merged, source, reviewed`
