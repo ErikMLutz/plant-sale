@@ -305,7 +305,7 @@ function buildMergePrompt(plant, ncsuData) {
     '  2. ENRICH: Squarespace gives a more specific version of something CSV mentions (e.g. CSV says "summer blooms", SS says "yellow summer blooms" → use "yellow summer blooms"). Only add detail about the same attribute.',
     '- Do NOT replace a CSV value with a Squarespace value just because wording differs. Only apply changes that fall under CORRECT or ENRICH above.',
     '- Do NOT add new <li> entries. Do NOT remove <li> entries. Keep the same number of bullets in the same order.',
-    '- Preserve the <p> highlight paragraph from CSV exactly unless it contains a direct factual error contradicted by Squarespace.',
+    '- Copy the <p> highlight paragraph from CSV verbatim. Do NOT rephrase, shorten, or rewrite it. The only permitted change is correcting a direct factual error (wrong species name, wrong region) that is explicitly contradicted by the Squarespace description or NCSU Toolbox data.',
     `- Native range: use NCSU Toolbox data if provided to fill/correct the origin. Then${ncLabel ? ` append ", ${ncLabel}"` : ' do not append any NC suffix — this plant has neither native nor piedmont-native tag'}.`,
     '- Return ONLY the HTML. No explanations, no JSON, no markdown.',
   ];

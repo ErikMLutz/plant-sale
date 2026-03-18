@@ -160,6 +160,15 @@
     <span id="zip-file-name" style="font-size:0.88em; color:#888; font-family:Calibri,sans-serif;">No file chosen</span>
   </div>
   <div id="import-status" style="margin-top:10px; font-size:0.85em; color:#555; min-height:1.2em;"></div>
+
+  <!-- Unmatched CSV plants (collapsed) -->
+  <details id="unmatched-csv-section" style="display:none; margin-top:12px;">
+    <summary id="unmatched-csv-summary" style="cursor:pointer; font-size:0.85em; font-family:Calibri,sans-serif; color:#888; user-select:none; list-style:none; display:flex; align-items:center; gap:6px;">
+      <span id="unmatched-csv-arrow" style="font-size:0.75em;">▶</span>
+      <span id="unmatched-csv-label"></span>
+    </summary>
+    <div id="unmatched-csv-body" style="margin-top:10px; font-family:Calibri,sans-serif; font-size:0.85em; color:#555; display:flex; flex-direction:column; gap:4px;"></div>
+  </details>
 </div>
 
 <!-- Step 2: AI Enrichment + Merge (collapsed by default) -->
@@ -354,6 +363,10 @@
 </div>
 
 <script>
+  document.getElementById('unmatched-csv-section').addEventListener('toggle', function() {
+    document.getElementById('unmatched-csv-arrow').textContent = this.open ? '▼' : '▶';
+  });
+
   function toggleEnrichContent(header) {
     const content = document.getElementById('enrich-content');
     const arrow   = header.querySelector('.collapsible-arrow');

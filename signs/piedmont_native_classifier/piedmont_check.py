@@ -106,7 +106,15 @@ def _fetch_bonap(latin):
             resp.raise_for_status()
             return Image.open(io.BytesIO(resp.content)).convert("RGB")
 
-        except requests.exceptions.Timeout:
+        except requests.exceptions.HTTPError as e:
+            # 404 means the species map doesn't exist — don't retry
+            if e.response is not None and e.response.status_code == 404:
+                raise
+            if attempt == retries - 1:
+                raise
+            time.sleep(1)
+
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
             if attempt == retries - 1:
                 raise
             time.sleep(1)

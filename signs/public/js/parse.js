@@ -202,11 +202,16 @@ function inferFromSsTags(category, tags) {
 function findCsvMatch(title, csvMap) {
   const normTitle = normalizeName(title);
 
-  // 1. Latin name in SS title
+  // 1. Latin name in SS title — pick longest (most specific) match
   if (csvMap.byLatin) {
+    let bestEntry = null, bestLen = 0;
     for (const [latinKey, entry] of csvMap.byLatin) {
-      if (normTitle.includes(latinKey)) return entry;
+      if (normTitle.includes(latinKey) && latinKey.length > bestLen) {
+        bestEntry = entry;
+        bestLen = latinKey.length;
+      }
     }
+    if (bestEntry) return bestEntry;
   }
 
   // 2. Exact common-name match

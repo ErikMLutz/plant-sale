@@ -20,6 +20,61 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+# ─── Ali's highlight lookup ────────────────────────────────────────────────────
+
+# Hardcoded latin name overrides: infosheet name → Ali's CSV name (lowercase).
+# Only needed for the two plants where spelling/encoding differs between sources.
+_ALI_LATIN_OVERRIDES = {
+    'helianthus angustifolius': 'helianthus angustifolia',
+    'leucanthemum \u00d7 superbum': 'leucanthemum x superbum',
+}
+
+
+def _ali_lookup_key(latin: str) -> str:
+    """Normalize a latin name for Ali highlight lookup: lowercase, strip cultivar/parens."""
+    return re.sub(r"\s*[('\"(].*", '', latin.lower()).strip()
+
+
+def load_ali_highlights(csv_path: Path) -> dict:
+    """
+    Load highlight_line values from Ali's original plants.csv.
+    Returns {normalized_latin: highlight_text}.
+    Exact latin key first; genus+species (first two words) as fallback.
+    """
+    highlights = {}
+    with open(csv_path, newline='', encoding='utf-8') as f:
+        for row in csv.DictReader(f):
+            latin = row.get('latin', '').strip()
+            hl = row.get('highlight_line', '').strip()
+            if not latin or not hl:
+                continue
+            key = _ali_lookup_key(latin)
+            highlights[key] = hl
+            # Also store genus+species key as fallback
+            words = key.split()
+            if len(words) >= 2:
+                gs_key = ' '.join(words[:2])
+                if gs_key not in highlights:
+                    highlights[gs_key] = hl
+    return highlights
+
+
+def get_ali_highlight(latin: str, ali_highlights: dict) -> str:
+    """Return Ali's highlight for the given latin name, or '' if not found."""
+    if not ali_highlights:
+        return ''
+    key = _ali_lookup_key(latin)
+    # Apply hardcoded overrides first
+    key = _ALI_LATIN_OVERRIDES.get(key, key)
+    if key in ali_highlights:
+        return ali_highlights[key]
+    # Genus+species fallback
+    words = key.split()
+    if len(words) >= 2:
+        gs_key = ' '.join(words[:2])
+        return ali_highlights.get(gs_key, '')
+    return ''
+
 # Import the Piedmont native classifier (sibling directory)
 sys.path.insert(0, str(Path(__file__).parent.parent / 'piedmont_native_classifier'))
 try:
@@ -428,6 +483,8 @@ def main():
     )
     default_output = Path.home() / 'Downloads' / 'upload' / 'plants.improved.csv'
 
+    default_highlight_csv = script_dir.parent / 'initial_info' / 'email2' / 'plants.csv'
+
     parser = argparse.ArgumentParser(description='Convert plant infosheets to plants.csv')
     parser.add_argument(
         'infosheet_dir', nargs='?', default=str(default_infosheet_dir),
@@ -436,6 +493,10 @@ def main():
     parser.add_argument(
         '--output', '-o', default=str(default_output),
         help=f'Output CSV path (default: {default_output})',
+    )
+    parser.add_argument(
+        '--highlight-csv', default=str(default_highlight_csv), metavar='PATH',
+        help=f'CSV with curated highlight_line values (default: {default_highlight_csv})',
     )
     parser.add_argument(
         '--skip-bonap', action='store_true',
@@ -455,6 +516,15 @@ def main():
         print(f'Error: directory not found: {infosheet_dir}', file=sys.stderr)
         sys.exit(1)
 
+    # ── Load Ali's curated highlights ─────────────────────────────────────────
+    highlight_csv_path = Path(args.highlight_csv).expanduser()
+    if highlight_csv_path.exists():
+        ali_highlights = load_ali_highlights(highlight_csv_path)
+        print(f'Loaded {len(ali_highlights)} highlight entries from {highlight_csv_path.name}')
+    else:
+        ali_highlights = {}
+        print(f'Warning: --highlight-csv not found ({highlight_csv_path}), using Cultural notes fallback')
+
     # ── Phase 1: parse all infosheets ─────────────────────────────────────────
     docx_files = sorted(infosheet_dir.glob('*.docx'))
     print(f'Found {len(docx_files)} .docx files in {infosheet_dir.name}/')
@@ -472,6 +542,11 @@ def main():
         if not plant:
             warnings.append(f'  SKIP  {path.name}: could not determine latin name')
             continue
+
+        # Override highlight_line with Ali's curated version when available
+        ali_hl = get_ali_highlight(plant['latin'], ali_highlights)
+        if ali_hl:
+            plant['highlight_line'] = ali_hl
 
         latin = plant['latin']
         priority = file_priority(path)

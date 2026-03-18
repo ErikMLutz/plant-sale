@@ -108,6 +108,65 @@ async function handleZipUpload() {
   }
 }
 
+// ─── Unmatched CSV plants ─────────────────────────────────────────────────────
+
+/**
+ * Return CSV entries from csvMap that were not matched by any SS title.
+ * Each result includes the entry and the closest SS title by word overlap (or null).
+ */
+function computeUnmatchedCsv(csvMap, ssTitles) {
+  // Determine which CSV entries were actually matched
+  const matchedCommons = new Set();
+  for (const title of ssTitles) {
+    const m = findCsvMatch(title, csvMap);
+    if (m) matchedCommons.add(m.common);
+  }
+
+  // Collect unmatched entries, deduplicating by common name
+  const seen = new Set();
+  const unmatched = [];
+  for (const [, entry] of csvMap) {
+    if (!matchedCommons.has(entry.common) && !seen.has(entry.common)) {
+      seen.add(entry.common);
+      unmatched.push(entry);
+    }
+  }
+
+  // For each unmatched entry, find the SS title with the best word overlap
+  return unmatched.map(entry => {
+    const csvWords = new Set(
+      normalizeName(`${entry.common} ${entry.latin || ''}`).split(' ').filter(Boolean)
+    );
+    let bestTitle = null, bestScore = 0;
+    for (const title of ssTitles) {
+      const shared = normalizeName(title).split(' ').filter(w => csvWords.has(w)).length;
+      const score  = shared / Math.max(csvWords.size, normalizeName(title).split(' ').length);
+      if (score > bestScore) { bestScore = score; bestTitle = title; }
+    }
+    return { entry, closest: bestScore > 0 ? bestTitle : null };
+  }).sort((a, b) => a.entry.common.localeCompare(b.entry.common));
+}
+
+function renderUnmatchedCsv(unmatched) {
+  const section = document.getElementById('unmatched-csv-section');
+  if (!unmatched.length) { section.style.display = 'none'; return; }
+
+  document.getElementById('unmatched-csv-label').textContent =
+    `${unmatched.length} plants in CSV not matched in Squarespace`;
+  section.style.display = 'block';
+
+  const body = document.getElementById('unmatched-csv-body');
+  body.innerHTML = unmatched.map(({ entry, closest }) => {
+    const name    = entry.latin
+      ? `${entry.common} <span style="color:#999;font-style:italic;">(${entry.latin})</span>`
+      : entry.common;
+    const suggest = closest
+      ? `<span style="color:#bbb; margin:0 6px;">→</span><span style="color:#888;">${closest}</span>`
+      : `<span style="color:#bbb; margin:0 6px;">→</span><span style="color:#ccc;">not in SS</span>`;
+    return `<div style="display:flex; align-items:baseline; gap:0; flex-wrap:wrap;">${name}${suggest}</div>`;
+  }).join('');
+}
+
 // ─── Import ───────────────────────────────────────────────────────────────────
 
 function runImport(ssContent, latestCsvContent) {
@@ -138,6 +197,7 @@ function runImport(ssContent, latestCsvContent) {
       );
     }
 
+    const ssTitles = filteredRows.map(r => r['Title']).filter(Boolean);
     plants = parseSquarespaceRows(filteredRows, csvMap, rows);
 
     if (DEBUG && debugState.limitEnabled && plants.length > debugState.limitValue) {
@@ -179,6 +239,10 @@ function runImport(ssContent, latestCsvContent) {
       document.getElementById('merge-btn-all').textContent  = `Merge all (${unmergedCount}) unmerged`;
       document.getElementById('enrich-status').textContent  = '';
       document.getElementById('merge-status').textContent   = '';
+    }
+
+    if (csvMap.size > 0) {
+      renderUnmatchedCsv(computeUnmatchedCsv(csvMap, ssTitles));
     }
 
     buildReviewPanel();
