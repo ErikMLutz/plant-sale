@@ -200,6 +200,7 @@ function runImport(ssContent, latestCsvContent) {
     const ssTitles = filteredRows.map(r => r['Title']).filter(Boolean);
     plants = parseSquarespaceRows(filteredRows, csvMap, rows);
 
+
     if (DEBUG && debugState.limitEnabled && plants.length > debugState.limitValue) {
       if (debugState.pickOverlap && csvMap.size > 0) {
         const csvPlants = plants.filter(p => p.source === 'csv');

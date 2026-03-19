@@ -142,7 +142,12 @@ function parsePlantsCsv(text) {
     };
 
     map.set(normalizeName(common), entry);
-    if (entry.latin) byLatin.set(normalizeName(entry.latin), entry);
+    if (entry.latin) {
+      const latinKey = normalizeName(entry.latin);
+      // If two CSV entries share the same latin name, mark it null (ambiguous)
+      // so findCsvMatch falls through to the more-specific common-name lookup.
+      byLatin.set(latinKey, byLatin.has(latinKey) ? null : entry);
+    }
   }
 
   // Attach latin index as a property so callers don't need a new signature
@@ -206,6 +211,7 @@ function findCsvMatch(title, csvMap) {
   if (csvMap.byLatin) {
     let bestEntry = null, bestLen = 0;
     for (const [latinKey, entry] of csvMap.byLatin) {
+      if (entry === null) continue;  // ambiguous — multiple CSV entries share this latin name
       if (normTitle.includes(latinKey) && latinKey.length > bestLen) {
         bestEntry = entry;
         bestLen = latinKey.length;
