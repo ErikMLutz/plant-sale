@@ -9,37 +9,13 @@ Exit code 1 if there are any differences, 0 if identical.
 """
 
 import csv
-import difflib
 import io
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import zipfile
-
-
-# ── ANSI colors ───────────────────────────────────────────────────────────────
-
-RED    = "\033[31m"
-GREEN  = "\033[32m"
-CYAN   = "\033[36m"
-YELLOW = "\033[33m"
-BOLD   = "\033[1m"
-RESET  = "\033[0m"
-
-def colorize_diff(lines):
-    out = []
-    for line in lines:
-        if line.startswith("---") or line.startswith("+++"):
-            out.append(BOLD + line + RESET)
-        elif line.startswith("@@"):
-            out.append(CYAN + line + RESET)
-        elif line.startswith("-"):
-            out.append(RED + line + RESET)
-        elif line.startswith("+"):
-            out.append(GREEN + line + RESET)
-        else:
-            out.append(line)
-    return out
 
 
 # ── HTML parsing ──────────────────────────────────────────────────────────────
@@ -129,35 +105,18 @@ def load_latest_csv(plant_file):
         return list(csv.DictReader(io.StringIO(text))), csvs[-1]
 
 
-# ── Matching ──────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def normalize(s):
     s = re.sub(r"[''`]", "", s.lower())
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]", " ", s)).strip()
 
-def build_index(rows):
-    by_latin  = {}
-    by_common = {}
-    for row in rows:
-        latin  = normalize(row.get("latin",  ""))
-        common = normalize(row.get("common", ""))
-        if latin:
-            by_latin[latin] = row
-        if common:
-            by_common[common] = row
-    return by_latin, by_common
+def render_all(rows):
+    def sort_key(r):
+        return normalize(r.get("latin", "") or r.get("common", ""))
+    blocks = [render_plant(r) for r in sorted(rows, key=sort_key)]
+    return "\n\n".join(blocks) + "\n"
 
-def find_match(row, by_latin, by_common):
-    latin  = normalize(row.get("latin",  ""))
-    common = normalize(row.get("common", ""))
-    if latin and latin in by_latin:
-        return by_latin[latin]
-    if common and common in by_common:
-        return by_common[common]
-    return None
-
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     if len(sys.argv) != 3:
@@ -177,68 +136,24 @@ def main():
     label_a = f"{os.path.basename(file_a)} ({csv_name_a})"
     label_b = f"{os.path.basename(file_b)} ({csv_name_b})"
 
-    by_latin_b, by_common_b = build_index(rows_b)
-    by_latin_a, by_common_a = build_index(rows_a)
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", prefix="plants_a_", delete=False) as fa, \
+         tempfile.NamedTemporaryFile("w", suffix=".txt", prefix="plants_b_", delete=False) as fb:
+        fa.write(render_all(rows_a))
+        fb.write(render_all(rows_b))
+        tmp_a, tmp_b = fa.name, fb.name
 
-    # Track which b rows were matched
-    matched_b = set()
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--word-diff=color", "--word-diff-regex=.",
+             f"--src-prefix={label_a}/", f"--dst-prefix={label_b}/",
+             tmp_a, tmp_b],
+            capture_output=False,
+        )
+    finally:
+        os.unlink(tmp_a)
+        os.unlink(tmp_b)
 
-    has_diff = False
-    output   = []
-
-    def sort_key(r):
-        return (normalize(r.get("latin", "") or r.get("common", "")))
-
-    for row_a in sorted(rows_a, key=sort_key):
-        row_b = find_match(row_a, by_latin_b, by_common_b)
-
-        if row_b is not None:
-            matched_b.add(normalize(row_b.get("latin", "") or row_b.get("common", "")))
-
-        text_a = render_plant(row_a)
-        text_b = render_plant(row_b) if row_b is not None else None
-
-        if row_b is None:
-            # Only in A
-            has_diff = True
-            header = YELLOW + BOLD + f"Only in {os.path.basename(file_a)}: {row_a.get('common','')}" + RESET
-            block  = "\n".join(RED + f"- {l}" + RESET for l in text_a.splitlines())
-            output.append(header + "\n" + block)
-            continue
-
-        if text_a == text_b:
-            continue
-
-        # Differ per plant
-        has_diff = True
-        diff_lines = list(difflib.unified_diff(
-            text_a.splitlines(keepends=True),
-            text_b.splitlines(keepends=True),
-            fromfile=label_a,
-            tofile=label_b,
-            n=3,
-        ))
-        common_name = row_a.get("common", "")
-        header = BOLD + f"=== {common_name} ===" + RESET
-        output.append(header + "\n" + "".join(colorize_diff(diff_lines)))
-
-    # Plants only in B
-    for row_b in sorted(rows_b, key=sort_key):
-        key = normalize(row_b.get("latin", "") or row_b.get("common", ""))
-        if key in matched_b:
-            continue
-        has_diff = True
-        text_b = render_plant(row_b)
-        header = YELLOW + BOLD + f"Only in {os.path.basename(file_b)}: {row_b.get('common','')}" + RESET
-        block  = "\n".join(GREEN + f"+ {l}" + RESET for l in text_b.splitlines())
-        output.append(header + "\n" + block)
-
-    if not has_diff:
-        print("No differences.")
-        sys.exit(0)
-
-    print("\n\n".join(output))
-    sys.exit(1)
+    sys.exit(result.returncode)
 
 
 if __name__ == "__main__":
