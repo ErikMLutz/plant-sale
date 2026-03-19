@@ -73,7 +73,7 @@ async function downloadZip(newCsvContent) {
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
-  a.download = `plant-sale-signs-data.${datetime}.zip`;
+  a.download = `plant-sale-signs-data.${datetime}.plant`;
   a.click();
   URL.revokeObjectURL(a.href);
 }

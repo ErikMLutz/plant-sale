@@ -140,23 +140,23 @@
 <div class="card instructions-card">
   <h2>How to Use</h2>
   <ol class="instructions-list">
-    <li><strong>Upload</strong> the <code>plant-sale-signs-data.*.zip</code> file you received, then click Import.</li>
+    <li><strong>Upload</strong> the <code>plant-sale-signs-data.*.plant</code> file you received, then click Import.</li>
     <li><strong>Review</strong> each plant in Step 3 — edit descriptions, adjust tags and categories, and click <em>Mark Reviewed</em> when done.</li>
-    <li><strong>Download</strong> the updated zip in Step 4 and pass it to the next reviewer (or return it to the coordinator).</li>
+    <li><strong>Download</strong> the updated .plant file in Step 4 and pass it to the next reviewer (or return it to the coordinator).</li>
   </ol>
-  <p class="instructions-note">Do not unzip or modify the zip file's contents — pass it as-is. Only the technical coordinator should work with the raw files inside.</p>
+  <p class="instructions-note">Do not open or modify the .plant file's contents — pass it as-is. Only the technical coordinator should work with the raw files inside.</p>
 </div>
 
 <!-- Step 1: Upload -->
 <div class="card" id="import-section">
   <h2>Step 1 — Upload</h2>
   <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin-bottom:14px;">
-    Upload the <code>plant-sale-signs-data.*.zip</code> file. The app will automatically find the Squarespace inventory
+    Upload the <code>plant-sale-signs-data.*.plant</code> file. The app will automatically find the Squarespace inventory
     and the most recent plant descriptions inside.
   </div>
   <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-    <input type="file" id="zip-file" accept=".zip" style="display:none" onchange="handleZipUpload()" />
-    <button onclick="document.getElementById('zip-file').click()">Choose zip file…</button>
+    <input type="file" id="zip-file" accept=".plant,.zip" style="display:none" onchange="handleZipUpload()" />
+    <button onclick="document.getElementById('zip-file').click()">Choose file…</button>
     <span id="zip-file-name" style="font-size:0.88em; color:#888; font-family:Calibri,sans-serif;">No file chosen</span>
   </div>
   <div id="import-status" style="margin-top:10px; font-size:0.85em; color:#555; min-height:1.2em;"></div>
@@ -345,11 +345,11 @@
 <div class="card" id="step4-section" style="display:none;">
   <h2 style="margin:0 0 14px;">Step 4 — Download</h2>
   <div style="font-size:0.88em; color:#555; font-family:Calibri,sans-serif; margin-bottom:16px;">
-    Download the updated zip to pass along, generate the PowerPoint for printing,
+    Download the updated .plant file to pass along, generate the PowerPoint for printing,
     or export an updated Squarespace inventory.
   </div>
   <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-    <button class="btn-action" onclick="downloadZipFile()">Download review zip</button>
+    <button class="btn-action" onclick="downloadZipFile()">Download .plant file</button>
     <button class="secondary" onclick="generatePPTX()" id="gen-btn">Generate PPTX</button>
     <button class="secondary" onclick="downloadUpdatedSsInventory()">Download updated SS inventory</button>
   </div>
