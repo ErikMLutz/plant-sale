@@ -22,6 +22,8 @@ async function readZipFile(file) {
   zip.forEach((relativePath, zipEntry) => {
     if (zipEntry.dir) return;
     const name = relativePath.replace(/^.*\//, ''); // strip any directory prefix
+    if (!/^(plants|inventory)/i.test(name)) return;     // only accept known-prefixed files
+    if (!/\.(csv|tsv)$/i.test(name)) return;            // only accept csv/tsv files
     readTasks.push(zipEntry.async('text').then(content => ({ name, content })));
   });
 
