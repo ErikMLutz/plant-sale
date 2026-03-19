@@ -309,9 +309,13 @@ function parseSquarespaceRows(rows, csvMap, allRows) {
       if (match.flag_for_review) {
         flag_for_review = true;
         if (match.reason_for_review) {
-          reason_for_review = reason_for_review
-            ? reason_for_review + '; ' + match.reason_for_review
-            : match.reason_for_review;
+          const existing = new Set(reason_for_review.split('; ').filter(Boolean));
+          const fresh = match.reason_for_review.split('; ').filter(s => s && !existing.has(s));
+          if (fresh.length) {
+            reason_for_review = reason_for_review
+              ? reason_for_review + '; ' + fresh.join('; ')
+              : fresh.join('; ');
+          }
         }
       }
     }

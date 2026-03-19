@@ -260,6 +260,98 @@ async function enrichAllPending(apiKey, limit, onProgress) {
 
 // ─── AI Description Merge ──────────────────────────────────────────────────────
 
+// ─── Native-range-only merge (for infosheet-derived / non-AI-enriched plants) ───────────
+
+/**
+ * Build a prompt asking for ONLY a short native range phrase.
+ * Returns a plain string like "Eastern US" or "North America" — not HTML.
+ */
+function buildNativeRangeMergePrompt(plant, ncsuData) {
+  const ncsuLines = [];
+  if (ncsuData && (ncsuData.distribution || ncsuData.origin)) {
+    if (ncsuData.distribution) ncsuLines.push(`NCSU Distribution: ${ncsuData.distribution}`);
+    if (ncsuData.origin)       ncsuLines.push(`NCSU Country/Region of Origin: ${ncsuData.origin}`);
+  }
+
+  // Extract the current native range bullet text from the description
+  const nrMatch = (plant.description || '').match(
+    /<li><strong>Native range:<\/strong>\s*(.*?)<\/li>/i
+  );
+  const currentNr = nrMatch ? nrMatch[1].trim() : '(not found)';
+
+  const lines = [
+    `You are helping fill in plant sale sign data for ${plant.common || plant.latin || 'this plant'}.`,
+    "Return ONLY a very short geographic phrase (2–5 words) for this plant's native range.",
+    'Examples: "Eastern US", "North America", "Southeastern US", "Asia", "Europe", "Mediterranean"',
+    '',
+    `Current native range text: ${currentNr}`,
+    `BONAP Piedmont NC native: ${plant.piedmont_native ? 'Yes' : 'No'}`,
+    ...(ncsuLines.length ? ncsuLines : ['NCSU data: not available']),
+    '',
+    'Return ONLY the short phrase. No punctuation at end. No explanation.',
+  ];
+  return lines.join('\n');
+}
+
+/**
+ * Replace (or insert) the Native range <li> bullet in an HTML description string.
+ * phrase  — short text like "Eastern US"
+ * ncLabel — string like "NC Piedmont Native" or null
+ */
+function replaceNativeRangeBullet(html, phrase, ncLabel) {
+  const value = ncLabel ? `${phrase}, ${ncLabel}` : phrase;
+  const newLi = `<li><strong>Native range:</strong> ${value}</li>`;
+  const updated = html.replace(
+    /<li><strong>Native range:<\/strong>.*?<\/li>/is,
+    newLi
+  );
+  // No existing native range bullet — insert before </ul>
+  return updated === html ? html.replace('</ul>', newLi + '</ul>') : updated;
+}
+
+/**
+ * Call gpt-4o-mini for native-range-only merge.
+ * Returns a new full description HTML string with only the native range bullet updated.
+ */
+async function callOpenAINativeRangeMerge(plant, apiKey) {
+  const ncsuData = await fetchNcsuDistribution(plant.latin || plant.common).catch(() => null);
+  const prompt   = buildNativeRangeMergePrompt(plant, ncsuData);
+  const ncLabel  = ncNativeLabel(plant);
+
+  console.groupCollapsed(`[merge-nr] ▶ ${plant.common} — native range only`);
+  console.log('prompt:', prompt);
+  console.groupEnd();
+
+  const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model:       'gpt-4o-mini',
+      messages:    [{ role: 'user', content: prompt }],
+      temperature: 0.1,
+      max_tokens:  20,
+    }),
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`OpenAI error ${resp.status}: ${body}`);
+  }
+
+  const data   = await resp.json();
+  const phrase = data.choices?.[0]?.message?.content?.trim()
+    ?.replace(/^["']|["']$/g, '')
+    ?.replace(/\.$/, '');
+  if (!phrase) throw new Error('Empty response from OpenAI');
+
+  const newDesc = replaceNativeRangeBullet(plant.description || '', phrase, ncLabel);
+  console.log(`[merge-nr] ✓ ${plant.common} — native range: "${phrase}"${ncLabel ? ', ' + ncLabel : ''}`);
+  return newDesc;
+}
+
 /**
  * Build the merge prompt for gpt-4o-mini.
  * Input: plant.ss_description_html (authoritative), plant.tags, plant.category,
@@ -366,11 +458,17 @@ async function callOpenAIMerge(plant, apiKey) {
 async function mergeDescription(plant, apiKey) {
   if (plant.description_merged === true) return plant;
 
+  // For infosheet-derived (non-AI-enriched) plants: update native range only.
+  // For AI-enriched plants: full description reconciliation against SS data.
+  const nativeRangeOnly = plant.source !== 'ai_enriched';
+  const caller = nativeRangeOnly ? callOpenAINativeRangeMerge : callOpenAIMerge;
+
   let html;
   try {
-    html = await callOpenAIMerge(plant, apiKey);
+    html = await caller(plant, apiKey);
   } catch (err) {
-    console.error('[merge] OpenAI failed for', plant.common, '—', err.message);
+    const tag = nativeRangeOnly ? '[merge-nr]' : '[merge]';
+    console.error(tag, 'OpenAI failed for', plant.common, '—', err.message);
     return { ...plant, mergeError: true };
   }
 
