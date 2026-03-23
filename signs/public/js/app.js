@@ -431,6 +431,7 @@ function buildReviewPanel() {
   document.getElementById('btn-auto-enrich-row').onclick  = runEnrichOnCurrentPlant;
   document.getElementById('btn-auto-merge-row').onclick   = runMergeOnCurrentPlant;
   document.getElementById('btn-mark-reviewed').onclick    = markReviewed;
+  document.getElementById('btn-pptx-single').onclick      = downloadSinglePlantPptx;
 
   document.getElementById('btn-copy-prompt-row').onclick = async () => {
     const plant = sortedPlantsCache[currentPlantIdx];
@@ -700,6 +701,28 @@ function updateMarkReviewedBtn(plant) {
   const btn = document.getElementById('btn-mark-reviewed');
   btn.className   = plant.reviewed ? 'secondary' : 'btn-action';
   btn.textContent = plant.reviewed ? '↩ Unmark Reviewed' : 'Mark Reviewed';
+}
+
+async function downloadSinglePlantPptx() {
+  const plant = sortedPlantsCache[currentPlantIdx];
+  if (!plant) return;
+  const btn = document.getElementById('btn-pptx-single');
+  btn.disabled    = true;
+  btn.textContent = 'Generating…';
+  try {
+    const photoData = await Promise.all((plant.photo_urls || []).map(u => fetchForPptx(u)));
+    const pptx = new PptxGenJS();
+    pptx.defineLayout({ name: 'SIGN_LAYOUT', width: SLIDE_CONFIG.slideW, height: SLIDE_CONFIG.slideH });
+    pptx.layout = 'SIGN_LAYOUT';
+    const slide = pptx.addSlide();
+    slide.background = { color: SLIDE_CONFIG.colors.signBg };
+    addSignToSlide(slide, plant, 0, photoData);
+    const safeName = (plant.common || 'plant').replace(/[^a-z0-9]/gi, '-').toLowerCase();
+    await pptx.writeFile({ fileName: `sign-${safeName}.pptx` });
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = 'Download slide';
+  }
 }
 
 function rebuildSort() {
