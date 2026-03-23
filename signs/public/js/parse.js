@@ -332,6 +332,9 @@ function parseSquarespaceRows(rows, csvMap, allRows) {
     finalTags.split(',').map(t => t.trim()).filter(Boolean).forEach(t => allSsTags.add(t));
     finalCategory.split(',').map(c => c.trim()).filter(Boolean).forEach(c => allSsCategories.add(c));
 
+    // Re-derive icon flags from the final (possibly CSV-edited) tags/categories
+    const final = inferFromSsTags(finalCategory, finalTags);
+
     result.push({
       common:               title,
       latin:                match ? (match.latin || '') : '',
@@ -342,10 +345,10 @@ function parseSquarespaceRows(rows, csvMap, allRows) {
       photo_urls,
       ss_description_html,
       description:          match ? (match.description || ss_description_html) : ss_description_html,
-      sun_levels:           ss.sun_levels,
-      moisture:             ss.moisture,
-      is_pollinator:        ss.is_pollinator,
-      is_deer_resistant:    ss.is_deer_resistant,
+      sun_levels:           final.sun_levels,
+      moisture:             final.moisture,
+      is_pollinator:        final.is_pollinator,
+      is_deer_resistant:    final.is_deer_resistant,
       piedmont_native:      ss.piedmont_native || (match ? !!match.piedmont_native : false),
       flag_for_review,
       reason_for_review,
