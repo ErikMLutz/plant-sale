@@ -196,7 +196,7 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
   if (iconParts.length > 0) {
     const threshold = ICON_CONFIG.overrunThreshold;
     const iconSize  = (threshold !== null && iconParts.length > threshold)
-      ? Math.round(fonts.icon.size * 0.67)
+      ? Math.round(fonts.icon.size * 0.80)
       : fonts.icon.size;
     slide.addText(iconParts.join('   '), {
       x: mX, y: iconStripY, w: slideW - mX * 2, h: iconStripH,
