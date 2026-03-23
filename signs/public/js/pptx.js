@@ -84,7 +84,7 @@ function buildIcons(plant) {
   if (moistStr) parts.push(moistStr);
   if (plant.is_pollinator)     parts.push(ICON_CONFIG.critter_friendly.show);
   if (plant.is_deer_resistant) parts.push(ICON_CONFIG.deer_resistant.show);
-  return parts.join('   ');
+  return parts;
 }
 
 /** Draw a muted green placeholder box in the photo area. */
@@ -192,11 +192,15 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
 
   // Icon strip — single line, full width starting from left margin
   slide.addShape('rect', { x: 0, y: iconStripY, w: slideW, h: iconStripH, fill: { color: colors.iconBg }, line: { color: colors.iconBg } });
-  const icons = buildIcons(plant);
-  if (icons) {
-    slide.addText(icons, {
+  const iconParts = buildIcons(plant);
+  if (iconParts.length > 0) {
+    const threshold = ICON_CONFIG.overrunThreshold;
+    const iconSize  = (threshold !== null && iconParts.length > threshold)
+      ? Math.round(fonts.icon.size * 0.67)
+      : fonts.icon.size;
+    slide.addText(iconParts.join('   '), {
       x: mX, y: iconStripY, w: slideW - mX * 2, h: iconStripH,
-      fontSize: fonts.icon.size, fontFace: fonts.icon.name,
+      fontSize: iconSize, fontFace: fonts.icon.name,
       color: colors.bodyText, valign: 'middle', wrap: false,
     });
   }

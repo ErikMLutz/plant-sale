@@ -65,6 +65,9 @@ const ICON_CONFIG = {
   },
   critter_friendly: { show: '🦋 Pollinator' },
   deer_resistant:   { show: '🦌 Deer Resistant' },
+  // If icon count exceeds this threshold, font size is reduced by 33%.
+  // Set to null to disable. Update once overrun threshold is confirmed.
+  overrunThreshold: 4,
 };
 
 // ─── Slide / layout configuration ────────────────────────────────────────────
