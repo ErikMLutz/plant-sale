@@ -39,9 +39,11 @@ function syncSettings() {
   const commonSize    = parseFloat(document.getElementById('cfg-font-common').value);
   const attribSize    = parseFloat(document.getElementById('cfg-font-attrib').value);
   const highlightSize = parseFloat(document.getElementById('cfg-font-highlight').value);
+  const iconSize      = parseFloat(document.getElementById('cfg-font-icon').value);
   if (commonSize > 0)    SLIDE_CONFIG.fonts.common.size    = commonSize;
   if (attribSize > 0)    SLIDE_CONFIG.fonts.attribute.size = attribSize;
   if (highlightSize > 0) SLIDE_CONFIG.fonts.highlight.size = highlightSize;
+  if (iconSize > 0)      SLIDE_CONFIG.fonts.icon.size      = iconSize;
 
   appSettings.filterVisible = document.getElementById('cfg-filter-visible').checked;
   appSettings.excludedPages = document.getElementById('cfg-excluded-pages').value
@@ -59,11 +61,11 @@ const ICON_CONFIG = {
     shade:      '☁ Shade',
   },
   moisture: {
-    wet:     '💧💧💧 Wet',
-    average: '💧💧  Average',
-    drought: '💧     Drought Tolerant',
+    wet:     'Wet',
+    average: 'Average',
+    drought: '🌵 Drought Tolerant',
   },
-  critter_friendly: { show: '🦋 Critter Friendly' },
+  critter_friendly: { show: '🦋 Pollinator' },
   deer_resistant:   { show: '🦌 Deer Resistant' },
 };
 
@@ -100,7 +102,7 @@ const SLIDE_CONFIG = {
     common:    { name: 'Georgia',        size: 24,  italic: false, bold: true  },
     attribute: { name: 'Calibri',        size: 18,  italic: false, bold: false },
     highlight: { name: 'Georgia',        size: 20,  italic: true,  bold: false },
-    icon:      { name: 'Segoe UI Emoji', size: 9,   italic: false, bold: false },
-    iconLabel: { name: 'Calibri',        size: 8.5, italic: false, bold: false },
+    icon:      { name: 'Segoe UI Emoji', size: 12,  italic: false, bold: false },
+    iconLabel: { name: 'Calibri',        size: 12,  italic: false, bold: false },
   },
 };

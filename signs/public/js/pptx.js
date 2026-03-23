@@ -77,30 +77,25 @@ function parseHtmlToRuns(html) {
  * Returns { line1: '...sun icons...', line2: '...moisture/critter/deer...' }
  */
 function buildIcons(plant) {
-  // Line 1: all selected sun levels
+  const parts = [];
   const sunLevels = Array.isArray(plant.sun_levels) ? plant.sun_levels : [];
-  const line1 = sunLevels.map(l => ICON_CONFIG.sun[l]).filter(Boolean).join('   ');
-
-  // Line 2: moisture + critter + deer
-  const line2Parts = [];
+  sunLevels.forEach(l => { const s = ICON_CONFIG.sun[l]; if (s) parts.push(s); });
   const moistStr = ICON_CONFIG.moisture[plant.moisture];
-  if (moistStr) line2Parts.push(moistStr);
-  if (plant.is_pollinator)     line2Parts.push(ICON_CONFIG.critter_friendly.show);
-  if (plant.is_deer_resistant) line2Parts.push(ICON_CONFIG.deer_resistant.show);
-  const line2 = line2Parts.join('   ');
-
-  return { line1, line2 };
+  if (moistStr) parts.push(moistStr);
+  if (plant.is_pollinator)     parts.push(ICON_CONFIG.critter_friendly.show);
+  if (plant.is_deer_resistant) parts.push(ICON_CONFIG.deer_resistant.show);
+  return parts.join('   ');
 }
 
 /** Draw a muted green placeholder box in the photo area. */
-function addPhotoPlaceholder(slide, yOffset, photoW, signH, colors) {
+function addPhotoPlaceholder(slide, yOffset, photoW, photoH, colors) {
   slide.addShape('rect', {
-    x: 0.09, y: yOffset, w: photoW - 0.09, h: signH,
+    x: 0.09, y: yOffset, w: photoW - 0.09, h: photoH,
     fill: { color: colors.photoBg },
     line: { color: colors.photoBg },
   });
   slide.addText('[ Photo ]', {
-    x: 0.09, y: yOffset, w: photoW - 0.09, h: signH,
+    x: 0.09, y: yOffset, w: photoW - 0.09, h: photoH,
     fontSize: 12, fontFace: 'Calibri', color: '6a8c65',
     align: 'center', valign: 'middle', italic: true,
   });
@@ -130,6 +125,7 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
   const contentW = slideW - photoW;
   const mX       = C.contentMarginX;
   const mY       = C.contentMarginY;
+  const iconStripH = 0.45;  // single line at 12pt
 
   // Background + left accent bar
   slide.addShape('rect', { x: 0, y: yOffset, w: slideW, h: signH, fill: { color: colors.signBg }, line: { color: colors.signBg } });
@@ -142,13 +138,13 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
   if (photos.length > 0) {
     for (let pi = photos.length - 1; pi >= 0; pi--) {
       try {
-        slide.addImage({ data: photos[pi], x: 0.09, y: yOffset, w: photoW - 0.09, h: signH });
+        slide.addImage({ data: photos[pi], x: 0.09, y: yOffset, w: photoW - 0.09, h: signH - iconStripH });
       } catch (e) {
         console.warn('[slide] addImage failed:', e.message);
       }
     }
   } else {
-    addPhotoPlaceholder(slide, yOffset, photoW, signH, colors);
+    addPhotoPlaceholder(slide, yOffset, photoW, signH - iconStripH, colors);
   }
 
   // Content area geometry
@@ -173,7 +169,6 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
     });
   }
 
-  const iconStripH = 0.65;  // tall enough for 2 lines
   const iconStripY = yOffset + signH - iconStripH;
   const textBoxY   = yOffset + mY;
   const textBoxH   = iconStripY - textBoxY - 0.05;
@@ -195,22 +190,14 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
 
   slide.addText(combinedRuns, { x: innerX, y: textBoxY, w: innerW, h: textBoxH, valign: 'top', wrap: true, autoFit: false });
 
-  // Icon strip — 2 lines
-  slide.addShape('rect', { x: contentX, y: iconStripY, w: contentW, h: iconStripH, fill: { color: colors.iconBg }, line: { color: colors.iconBg } });
+  // Icon strip — single line, full width starting from left margin
+  slide.addShape('rect', { x: 0, y: iconStripY, w: slideW, h: iconStripH, fill: { color: colors.iconBg }, line: { color: colors.iconBg } });
   const icons = buildIcons(plant);
-  const iconLineH = iconStripH / 2;
-  if (icons.line1) {
-    slide.addText(icons.line1, {
-      x: innerX, y: iconStripY + 0.04, w: innerW, h: iconLineH,
+  if (icons) {
+    slide.addText(icons, {
+      x: mX, y: iconStripY, w: slideW - mX * 2, h: iconStripH,
       fontSize: fonts.icon.size, fontFace: fonts.icon.name,
-      color: colors.bodyText, valign: 'top', wrap: false,
-    });
-  }
-  if (icons.line2) {
-    slide.addText(icons.line2, {
-      x: innerX, y: iconStripY + iconLineH, w: innerW, h: iconLineH,
-      fontSize: fonts.icon.size, fontFace: fonts.icon.name,
-      color: colors.bodyText, valign: 'top', wrap: false,
+      color: colors.bodyText, valign: 'middle', wrap: false,
     });
   }
 }
