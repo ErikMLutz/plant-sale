@@ -61,8 +61,6 @@ const ICON_CONFIG = {
     shade:      '☁ Shade',
   },
   moisture: {
-    wet:     'Wet',
-    average: 'Average',
     drought: '🌵 Drought Tolerant',
   },
   critter_friendly: { show: '🦋 Pollinator' },
@@ -102,7 +100,7 @@ const SLIDE_CONFIG = {
     common:    { name: 'Georgia',        size: 24,  italic: false, bold: true  },
     attribute: { name: 'Calibri',        size: 18,  italic: false, bold: false },
     highlight: { name: 'Georgia',        size: 20,  italic: true,  bold: false },
-    icon:      { name: 'Segoe UI Emoji', size: 12,  italic: false, bold: false },
-    iconLabel: { name: 'Calibri',        size: 12,  italic: false, bold: false },
+    icon:      { name: 'Segoe UI Emoji', size: 18,  italic: false, bold: false },
+    iconLabel: { name: 'Calibri',        size: 18,  italic: false, bold: false },
   },
 };
