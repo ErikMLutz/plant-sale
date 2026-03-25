@@ -160,7 +160,7 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
     slide.addShape('star32', {
       x: badgeX, y: badgeY, w: badgeD, h: badgeD,
       fill: { color: colors.piedmontBadge },
-      line: { color: colors.piedmontBadgeBorder, w: 2.25 },
+      line: { color: colors.piedmontBadgeBorder, pt: 2.25 },
     });
     slide.addText('NC\nPiedmont\nNative', {
       x: badgeX, y: badgeY, w: badgeD, h: badgeD,
