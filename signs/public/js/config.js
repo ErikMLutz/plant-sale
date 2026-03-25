@@ -95,14 +95,16 @@ const SLIDE_CONFIG = {
     dividerLine:       '2d5a27',
     iconBg:            'eaf3e8',
     signBg:            'FFFFFF',
-    piedmontBadge:     'FFD700',  // bright gold
-    piedmontBadgeText: '2d5a27',  // same dark green as title
+    piedmontBadge:       'ED7D31',  // orange
+    piedmontBadgeBorder: 'FFD700',  // gold border
+    piedmontBadgeText:   'FFFFFF',  // white text
   },
 
   fonts: {
+    latin:     { name: 'Georgia',        size: 24,  italic: true,  bold: false },
     common:    { name: 'Georgia',        size: 24,  italic: false, bold: true  },
-    attribute: { name: 'Calibri',        size: 18,  italic: false, bold: false },
-    highlight: { name: 'Georgia',        size: 20,  italic: true,  bold: false },
+    attribute: { name: 'Calibri',        size: 20,  italic: false, bold: false },
+    highlight: { name: 'Georgia',        size: 18,  italic: true,  bold: false },
     icon:      { name: 'Segoe UI Emoji', size: 18,  italic: false, bold: false },
     iconLabel: { name: 'Calibri',        size: 18,  italic: false, bold: false },
   },

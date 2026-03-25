@@ -11,8 +11,9 @@
  *
  * Uses a temporary DOM element to parse HTML — no external parser needed.
  */
-function parseHtmlToRuns(html) {
+function parseHtmlToRuns(html, opts = {}) {
   const { fonts, colors } = SLIDE_CONFIG;
+  const attrSize = opts.attrFontSize != null ? opts.attrFontSize : fonts.attribute.size;
   const el = document.createElement('div');
   el.innerHTML = html || '';
 
@@ -26,7 +27,7 @@ function parseHtmlToRuns(html) {
         if (li.nodeName !== 'LI') continue;
 
         // Bullet marker
-        runs.push({ text: '• ', options: { fontSize: fonts.attribute.size, color: colors.accentGreen, bold: true, fontFace: fonts.attribute.name } });
+        runs.push({ text: '• ', options: { fontSize: attrSize, color: colors.accentGreen, bold: true, fontFace: fonts.attribute.name } });
 
         // Walk li child nodes — split <strong>/<b> (bold) from text nodes (plain)
         const liChildren = Array.from(li.childNodes);
@@ -35,13 +36,13 @@ function parseHtmlToRuns(html) {
           const isBold = child.nodeName === 'STRONG' || child.nodeName === 'B';
           const t = child.textContent || '';
           if (!t) continue;
-          liRuns.push({ text: t, options: { fontSize: fonts.attribute.size, bold: isBold, color: colors.bodyText, fontFace: fonts.attribute.name } });
+          liRuns.push({ text: t, options: { fontSize: attrSize, bold: isBold, color: colors.bodyText, fontFace: fonts.attribute.name } });
         }
 
         if (liRuns.length === 0) {
           // Fallback: use full text content as plain run
           const t = li.textContent.trim();
-          if (t) liRuns.push({ text: t, options: { fontSize: fonts.attribute.size, bold: false, color: colors.bodyText, fontFace: fonts.attribute.name } });
+          if (t) liRuns.push({ text: t, options: { fontSize: attrSize, bold: false, color: colors.bodyText, fontFace: fonts.attribute.name } });
         }
 
         if (liRuns.length > 0) {
@@ -151,7 +152,7 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
   const innerX = contentX + mX;
   const innerW = contentW - mX * 2;
 
-  // Piedmont native badge — golden circle in the top-left corner of the sign
+  // Piedmont native badge — orange circle in the top-left corner of the sign
   if (plant.piedmont_native) {
     const badgeD = 1.0;
     const badgeX = 0.05;
@@ -159,11 +160,11 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
     slide.addShape('star32', {
       x: badgeX, y: badgeY, w: badgeD, h: badgeD,
       fill: { color: colors.piedmontBadge },
-      line: { color: colors.piedmontBadge },
+      line: { color: colors.piedmontBadgeBorder, w: 2.25 },
     });
     slide.addText('NC\nPiedmont\nNative', {
       x: badgeX, y: badgeY, w: badgeD, h: badgeD,
-      fontSize: 9, fontFace: 'Calibri',
+      fontSize: 12, fontFace: 'Calibri',
       bold: true, color: colors.piedmontBadgeText,
       align: 'center', valign: 'middle',
     });
@@ -173,22 +174,74 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
   const textBoxY   = yOffset + mY;
   const textBoxH   = iconStripY - textBoxY - 0.05;
 
-  // Combined text box: common name + description (HTML)
-  const combinedRuns = [];
+  // Parse description into bullet runs and highlight text separately
+  const descEl = document.createElement('div');
+  descEl.innerHTML = plant.description || '';
+  const ulEl = descEl.querySelector('ul');
+  const pEl  = descEl.querySelector('p');
+  const highlightText = pEl ? pEl.textContent.trim() : '';
 
-  // Common name
-  combinedRuns.push({
-    text: plant.common || '',
-    options: { fontSize: fonts.common.size, fontFace: fonts.common.name, bold: true, color: colors.headerGreen, breakLine: true },
-  });
+  // Split SS title "Latin name (Common Name)" into two display lines.
+  // Falls back gracefully if no parenthetical or no latin field.
+  const parenMatch = (plant.common || '').match(/^(.+?)\s*\((.+)\)\s*$/);
+  let latinLine, commonLine;
+  if (plant.latin) {
+    latinLine  = plant.latin;
+    commonLine = parenMatch ? parenMatch[2] : plant.common;
+  } else if (parenMatch) {
+    latinLine  = parenMatch[1];
+    commonLine = parenMatch[2];
+  } else {
+    latinLine  = '';
+    commonLine = plant.common || '';
+  }
 
-  // Spacer between title and description
-  combinedRuns.push({ text: ' ', options: { fontSize: 6, breakLine: true } });
+  // Auto-size bullets: reduce by 2pt if estimated top content would overflow into the highlight area.
+  // Estimate line counts using Canvas-based wrapping (same approach as common name wrapping).
+  const LINE_H     = sz => (sz / 24) * 0.40;  // line height in inches for a given pt size
+  const effectiveW = innerW * 0.88;            // matches PowerPoint's effective text box width
+  const latinLineCount  = latinLine
+    ? estimateWrappedLines(latinLine,  effectiveW, { name: fonts.latin.name,  size: fonts.latin.size,  italic: true })
+    : 0;
+  const commonLineCount = estimateWrappedLines(commonLine, effectiveW, { name: fonts.common.name, size: fonts.common.size, bold: true });
+  const liEls = ulEl ? Array.from(ulEl.querySelectorAll('li')) : [];
+  // Estimate with bold=true (conservative: bold label chars are wider than plain)
+  const bulletTexts = liEls.map(li => '• ' + li.textContent.trim());
 
-  // Description runs (parsed from HTML)
-  combinedRuns.push(...parseHtmlToRuns(plant.description));
+  const highlightBoxH = 1.3;
+  const highlightBoxY = iconStripY - highlightBoxH;
 
-  slide.addText(combinedRuns, { x: innerX, y: textBoxY, w: innerW, h: textBoxH, valign: 'top', wrap: true, autoFit: false });
+  let attrFontSize = fonts.attribute.size;
+  const bulletLineCount = bulletTexts.reduce(
+    (n, t) => n + estimateWrappedLines(t, effectiveW, { name: fonts.attribute.name, size: attrFontSize, bold: true }),
+    0
+  );
+  const estHeight = (latinLineCount + commonLineCount) * LINE_H(fonts.latin.size) + 0.083 + bulletLineCount * LINE_H(attrFontSize);
+  if (textBoxY + estHeight > highlightBoxY) {
+    attrFontSize -= 2;
+  }
+
+  const bulletRuns = parseHtmlToRuns(ulEl ? `<ul>${ulEl.innerHTML}</ul>` : '', { attrFontSize });
+
+  // Top text box: latin + common name + attribute bullets (top-anchored)
+  const topRuns = [];
+  if (latinLine) {
+    topRuns.push({ text: latinLine, options: { fontSize: fonts.latin.size, fontFace: fonts.latin.name, italic: true, bold: false, color: colors.headerGreen, breakLine: true } });
+  }
+  topRuns.push({ text: commonLine, options: { fontSize: fonts.common.size, fontFace: fonts.common.name, bold: true, italic: false, color: colors.headerGreen, breakLine: true } });
+  topRuns.push({ text: ' ', options: { fontSize: 6, breakLine: true } });
+  topRuns.push(...bulletRuns);
+  slide.addText(topRuns, { x: innerX, y: textBoxY, w: innerW, h: textBoxH, valign: 'top', wrap: true, autoFit: false });
+
+  // Bottom text box: highlight/flavor text — pinned just above the icon strip
+  if (highlightText) {
+    slide.addText(highlightText, {
+      x: innerX, y: highlightBoxY, w: innerW, h: highlightBoxH,
+      fontSize: fonts.highlight.size, fontFace: fonts.highlight.name,
+      italic: true, color: colors.highlightText,
+      valign: 'bottom', wrap: true, autoFit: false,
+    });
+  }
 
   // Icon strip — single line, full width starting from left margin
   slide.addShape('rect', { x: 0, y: iconStripY, w: slideW, h: iconStripH, fill: { color: colors.iconBg }, line: { color: colors.iconBg } });
@@ -234,26 +287,34 @@ async function generatePPTX() {
   const CONCURRENCY = 4;
   let completed = 0;
 
+  // Sort plants: category A-Z, then common name A-Z within each category
+  const sortedPlants = [...plants].sort((a, b) => {
+    const catA = (a.category || '').toLowerCase();
+    const catB = (b.category || '').toLowerCase();
+    if (catA !== catB) return catA.localeCompare(catB);
+    return (a.common || '').toLowerCase().localeCompare((b.common || '').toLowerCase());
+  });
+
   const photoDataArrs = await (async () => {
-    const results = new Array(plants.length);
+    const results = new Array(sortedPlants.length);
     let nextIdx   = 0;
     async function worker() {
-      while (nextIdx < plants.length) {
+      while (nextIdx < sortedPlants.length) {
         const i    = nextIdx++;
-        const urls = plants[i].photo_urls || [];
+        const urls = sortedPlants[i].photo_urls || [];
         results[i] = await Promise.all(urls.map(u => fetchForPptx(u)));
         completed++;
-        const pct = Math.round((completed / plants.length) * 100);
+        const pct = Math.round((completed / sortedPlants.length) * 100);
         progressBar.style.width    = pct + '%';
-        progressLabel.textContent  = `Fetching photos… ${completed} / ${plants.length}`;
+        progressLabel.textContent  = `Fetching photos… ${completed} / ${sortedPlants.length}`;
       }
     }
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, plants.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, sortedPlants.length) }, worker));
     return results;
   })();
 
-  const slideCount = Math.ceil(plants.length / 2);
-  const estSecs = Math.ceil(plants.length / 2);
+  const slideCount = Math.ceil(sortedPlants.length / 2);
+  const estSecs = Math.ceil(sortedPlants.length / 2);
   const estStr  = estSecs >= 60
     ? `up to ${Math.ceil(estSecs / 60)} minute${Math.ceil(estSecs / 60) > 1 ? 's' : ''}`
     : `up to ${estSecs} second${estSecs !== 1 ? 's' : ''}`;
@@ -268,14 +329,14 @@ async function generatePPTX() {
     const cutGap = SLIDE_CONFIG.cutGap;
 
     // Two plants per slide, stacked vertically with a cut gap between them.
-    for (let i = 0; i < plants.length; i += 2) {
+    for (let i = 0; i < sortedPlants.length; i += 2) {
       const slide = pptx.addSlide();
       slide.background = { color: SLIDE_CONFIG.colors.signBg };
 
-      addSignToSlide(slide, plants[i], 0, photoDataArrs[i]);
+      addSignToSlide(slide, sortedPlants[i], 0, photoDataArrs[i]);
 
-      if (plants[i + 1]) {
-        addSignToSlide(slide, plants[i + 1], signH + cutGap, photoDataArrs[i + 1]);
+      if (sortedPlants[i + 1]) {
+        addSignToSlide(slide, sortedPlants[i + 1], signH + cutGap, photoDataArrs[i + 1]);
       }
     }
 
@@ -283,7 +344,7 @@ async function generatePPTX() {
 
     progressWrap.style.display = 'none';
     status.className   = 'success';
-    status.textContent = `✓ Downloaded plant-sale-signs.pptx (${plants.length} plants, ${slideCount} slides) successfully!`;
+    status.textContent = `✓ Downloaded plant-sale-signs.pptx (${sortedPlants.length} plants, ${slideCount} slides) successfully!`;
   } catch (err) {
     console.error('[pptx] Generation failed:', err);
     progressWrap.style.display = 'none';
