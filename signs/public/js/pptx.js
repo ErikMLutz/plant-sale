@@ -217,7 +217,9 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
     0
   );
   const estHeight = (latinLineCount + commonLineCount) * LINE_H(fonts.latin.size) + 0.083 + bulletLineCount * LINE_H(attrFontSize);
-  if (textBoxY + estHeight > highlightBoxY) {
+  // Add one line of cushion: Canvas slightly underestimates vs PowerPoint's actual render,
+  // so reduce if content comes within one bullet-line-height of the highlight box.
+  if (textBoxY + estHeight + LINE_H(attrFontSize) > highlightBoxY) {
     attrFontSize -= 2;
   }
 
