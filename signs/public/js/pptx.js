@@ -162,7 +162,7 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
       fill: { color: colors.piedmontBadge },
       line: { color: colors.piedmontBadgeBorder, pt: 2.25 },
     });
-    slide.addText('NC\nPiedmont\nNative', {
+    slide.addText('NC\nPiedmont\nNative!', {
       x: badgeX, y: badgeY, w: badgeD, h: badgeD,
       fontSize: 12, fontFace: 'Calibri',
       bold: true, color: colors.piedmontBadgeText,
