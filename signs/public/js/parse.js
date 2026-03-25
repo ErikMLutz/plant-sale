@@ -282,6 +282,7 @@ function parseSquarespaceRows(rows, csvMap, allRows) {
     if (!title) continue;  // skip variant rows
 
     const ss_description_html = row['Description'] || '';
+    const page     = row['Product Page'] || '';
     const category = row['Categories'] || '';
     const tags     = row['Tags']       || '';
     const photo_urls = (row['Hosted Image URLs'] || '').split(/\s+/).map(u => u.trim()).filter(Boolean);
@@ -338,6 +339,7 @@ function parseSquarespaceRows(rows, csvMap, allRows) {
     result.push({
       common:               title,
       latin:                match ? (match.latin || '') : '',
+      page,
       ss_tags_original:     tagsNormalized,
       ss_category_original: categoryNormalized,
       category:             finalCategory,

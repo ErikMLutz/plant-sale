@@ -160,7 +160,7 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
     slide.addShape('star32', {
       x: badgeX, y: badgeY, w: badgeD, h: badgeD,
       fill: { color: colors.piedmontBadge },
-      line: { color: colors.piedmontBadgeBorder, pt: 2.25 },
+      line: { color: colors.piedmontBadgeBorder, width: 2.25 },
     });
     slide.addText('NC\nPiedmont\nNative!', {
       x: badgeX, y: badgeY, w: badgeD, h: badgeD,
@@ -287,11 +287,11 @@ async function generatePPTX() {
   const CONCURRENCY = 4;
   let completed = 0;
 
-  // Sort plants: category A-Z, then latin name A-Z within each category
+  // Sort plants: SS page A-Z, then latin name A-Z within each page
   const sortedPlants = [...plants].sort((a, b) => {
-    const catA = (a.category || '').toLowerCase();
-    const catB = (b.category || '').toLowerCase();
-    if (catA !== catB) return catA.localeCompare(catB);
+    const pageA = (a.page || '').toLowerCase();
+    const pageB = (b.page || '').toLowerCase();
+    if (pageA !== pageB) return pageA.localeCompare(pageB);
     return (a.latin || a.common || '').toLowerCase().localeCompare((b.latin || b.common || '').toLowerCase());
   });
 
@@ -343,7 +343,7 @@ async function generatePPTX() {
     let i = 0;
     while (i < sortedPlants.length) {
       const plant = sortedPlants[i];
-      const cat   = (plant.category || '').toLowerCase();
+      const cat   = (plant.page || '').toLowerCase();
 
       if (cat !== currentCategory) {
         currentCategory = cat;
@@ -362,7 +362,7 @@ async function generatePPTX() {
 
       // Pair plants within the same category; don't pair across categories
       const next = sortedPlants[i + 1];
-      const nextCat = next ? (next.category || '').toLowerCase() : null;
+      const nextCat = next ? (next.page || '').toLowerCase() : null;
       if (nextCat === cat) {
         flushPair(plant, photoDataArrs[i], next, photoDataArrs[i + 1]);
         i += 2;
