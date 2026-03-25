@@ -287,12 +287,12 @@ async function generatePPTX() {
   const CONCURRENCY = 4;
   let completed = 0;
 
-  // Sort plants: category A-Z, then common name A-Z within each category
+  // Sort plants: category A-Z, then latin name A-Z within each category
   const sortedPlants = [...plants].sort((a, b) => {
     const catA = (a.category || '').toLowerCase();
     const catB = (b.category || '').toLowerCase();
     if (catA !== catB) return catA.localeCompare(catB);
-    return (a.common || '').toLowerCase().localeCompare((b.common || '').toLowerCase());
+    return (a.latin || a.common || '').toLowerCase().localeCompare((b.latin || b.common || '').toLowerCase());
   });
 
   const photoDataArrs = await (async () => {
@@ -329,14 +329,46 @@ async function generatePPTX() {
     const cutGap = SLIDE_CONFIG.cutGap;
 
     // Two plants per slide, stacked vertically with a cut gap between them.
-    for (let i = 0; i < sortedPlants.length; i += 2) {
+    // A category divider slide is inserted before each new category group.
+    let currentCategory = null;
+
+    const flushPair = (plantA, photoA, plantB, photoB) => {
       const slide = pptx.addSlide();
       slide.background = { color: SLIDE_CONFIG.colors.signBg };
+      addSignToSlide(slide, plantA, 0, photoA);
+      if (plantB) addSignToSlide(slide, plantB, signH + cutGap, photoB);
+    };
 
-      addSignToSlide(slide, sortedPlants[i], 0, photoDataArrs[i]);
+    // Group plants by category, emit a divider slide before each group
+    let i = 0;
+    while (i < sortedPlants.length) {
+      const plant = sortedPlants[i];
+      const cat   = (plant.category || '').toLowerCase();
 
-      if (sortedPlants[i + 1]) {
-        addSignToSlide(slide, sortedPlants[i + 1], signH + cutGap, photoDataArrs[i + 1]);
+      if (cat !== currentCategory) {
+        currentCategory = cat;
+
+        // Category divider slide
+        const divider = pptx.addSlide();
+        divider.background = { color: 'FFFFFF' };
+        const label = cat.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        divider.addText(label, {
+          x: 0, y: 0, w: SLIDE_CONFIG.slideW, h: SLIDE_CONFIG.slideH,
+          fontSize: 40, fontFace: 'Georgia', bold: true,
+          color: SLIDE_CONFIG.colors.headerGreen,
+          align: 'center', valign: 'middle',
+        });
+      }
+
+      // Pair plants within the same category; don't pair across categories
+      const next = sortedPlants[i + 1];
+      const nextCat = next ? (next.category || '').toLowerCase() : null;
+      if (nextCat === cat) {
+        flushPair(plant, photoDataArrs[i], next, photoDataArrs[i + 1]);
+        i += 2;
+      } else {
+        flushPair(plant, photoDataArrs[i], null, null);
+        i += 1;
       }
     }
 
@@ -344,7 +376,7 @@ async function generatePPTX() {
 
     progressWrap.style.display = 'none';
     status.className   = 'success';
-    status.textContent = `✓ Downloaded plant-sale-signs.pptx (${sortedPlants.length} plants, ${slideCount} slides) successfully!`;
+    status.textContent = `✓ Downloaded plant-sale-signs.pptx (${sortedPlants.length} plants) successfully!`;
   } catch (err) {
     console.error('[pptx] Generation failed:', err);
     progressWrap.style.display = 'none';
