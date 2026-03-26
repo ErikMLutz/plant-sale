@@ -216,7 +216,7 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
     (n, t) => n + estimateWrappedLines(t, effectiveW, { name: fonts.attribute.name, size: attrFontSize, bold: true }),
     0
   );
-  const estHeight = (latinLineCount + commonLineCount) * LINE_H(fonts.latin.size) + 0.083 * 2 + bulletLineCount * LINE_H(attrFontSize);
+  const estHeight = (latinLineCount + commonLineCount) * LINE_H(fonts.latin.size) + LINE_H(10) * 2 + bulletLineCount * LINE_H(attrFontSize);
   // Add one line of cushion: Canvas slightly underestimates vs PowerPoint's actual render,
   // so reduce if content comes within one bullet-line-height of the highlight box.
   if (textBoxY + estHeight + LINE_H(attrFontSize) > highlightBoxY) {
@@ -231,8 +231,8 @@ function addSignToSlide(slide, plant, yOffset, photoDataArr) {
     topRuns.push({ text: latinLine, options: { fontSize: fonts.latin.size, fontFace: fonts.latin.name, italic: true, bold: false, color: colors.headerGreen, breakLine: true } });
   }
   topRuns.push({ text: commonLine, options: { fontSize: fonts.common.size, fontFace: fonts.common.name, bold: true, italic: false, color: colors.headerGreen, breakLine: true } });
-  topRuns.push({ text: ' ', options: { fontSize: 6, breakLine: true } });
-  topRuns.push({ text: ' ', options: { fontSize: 6, breakLine: true } });
+  topRuns.push({ text: ' ', options: { fontSize: 10, breakLine: true } });
+  topRuns.push({ text: ' ', options: { fontSize: 10, breakLine: true } });
   topRuns.push(...bulletRuns);
   slide.addText(topRuns, { x: innerX, y: textBoxY, w: innerW, h: textBoxH, valign: 'top', wrap: true, autoFit: false });
 
